@@ -1,15 +1,15 @@
 # audiomorph
 
-[![CI](https://github.com/schollz/audiomorph/actions/workflows/ci.yml/badge.svg)](https://github.com/schollz/audiomorph/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/schollz/audiomorph/branch/main/graph/badge.svg)](https://codecov.io/gh/schollz/audiomorph)
-[![Release](https://img.shields.io/github/v/release/schollz/audiomorph)](https://github.com/schollz/audiomorph/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/schollz/audiomorph.svg)](https://pkg.go.dev/github.com/schollz/audiomorph)
+[![CI](https://github.com/zahi-ko/audiomorph/actions/workflows/ci.yml/badge.svg)](https://github.com/zahi-ko/audiomorph/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zahi-ko/audiomorph/branch/main/graph/badge.svg)](https://codecov.io/gh/zahi-ko/audiomorph)
+[![Release](https://img.shields.io/github/v/release/zahi-ko/audiomorph)](https://github.com/zahi-ko/audiomorph/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zahi-ko/audiomorph.svg)](https://pkg.go.dev/github.com/zahi-ko/audiomorph)
 
 A Go library and CLI tool for decoding and encoding audio files across multiple formats. audiomorph provides a unified interface for reading audio data from WAV, AIFF, MP3, OGG, and FLAC files, and encoding to WAV, AIFF, MP3, OGG, and FLAC formats.
 
 ## How It Works
 
-audiomorph decodes audio files into a common in-memory representation (`Audio` struct) containing deinterlaced PCM data, then encodes that data to your desired output format. The library handles format-specific quirks and provides a consistent API regardless of the underlying codec.
+audiomorph decodes audio files into a common in-memory representation (`Audio` struct) containing interleaved PCM data, then encodes that data to your desired output format. The input format is detected automatically by content sniffing, so files do not need a correct extension. The library handles format-specific quirks and provides a consistent API regardless of the underlying codec.
 
 ### Dependencies
 
@@ -24,11 +24,14 @@ This project is grateful for and depends on these excellent Go libraries:
 
 ## API
 
-The library exposes two primary functions:
+The library exposes three primary functions:
 
 ```go
-// Decode audio from file (supports WAV, AIFF, MP3, OGG, FLAC)
+// Decode audio from file (WAV, AIFF, MP3, OGG, FLAC — format auto-detected)
 audio, err := audiomorph.DecodeFile("input.mp3")
+
+// Decode audio from any io.ReadSeeker (bytes.Reader, bufio.Reader, network stream...)
+audio, err := audiomorph.Decode(bytes.NewReader(data))
 
 // Encode audio to file (supports WAV, AIFF, MP3, OGG, FLAC)
 err = audiomorph.EncodeFile(audio, "output.wav")
@@ -41,9 +44,21 @@ type Audio struct {
     NumChannels int      // Number of audio channels
     SampleRate  int      // Sample rate in Hz
     BitDepth    int      // Bit depth (bits per sample)
-    Data        [][]int  // Deinterlaced PCM data [channel][sample]
+    Format      string   // Detected source format: "wav", "aiff", "mp3", "ogg", "flac"
+    Data        []int    // Interleaved PCM data: Data[sample*NumChannels + channel]
     Duration    float64  // Duration in seconds
 }
+```
+
+### Format Detection
+
+`Decode` and `DecodeFile` identify the input format by sniffing its leading bytes (magic numbers), not by file extension. You can also detect a format on its own:
+
+```go
+f, _ := os.Open("mystery_audio")
+defer f.Close()
+
+format, err := audiomorph.DetectFormat(f) // "wav", "aiff", "mp3", "ogg", or "flac"
 ```
 
 ## Usage
@@ -51,7 +66,7 @@ type Audio struct {
 ### Installation
 
 ```bash
-go install github.com/schollz/audiomorph/cmd/audiomorph@latest
+go install github.com/zahi-ko/audiomorph/cmd/audiomorph@latest
 ```
 
 ### Command Line
@@ -100,9 +115,9 @@ Supported bit depths: `8`, `16`, `24`, `32`
 ### Library Usage
 
 ```go
-import "github.com/schollz/audiomorph"
+import "github.com/zahi-ko/audiomorph"
 
-// Decode audio file
+// Decode audio file (format is detected automatically)
 audio, err := audiomorph.DecodeFile("input.mp3")
 if err != nil {
     log.Fatal(err)
@@ -111,6 +126,7 @@ if err != nil {
 // Process audio data...
 fmt.Printf("Duration: %.2f seconds\n", audio.Duration)
 fmt.Printf("Sample rate: %d Hz\n", audio.SampleRate)
+fmt.Printf("Source format: %s\n", audio.Format)
 
 // Encode to different format
 err = audiomorph.EncodeFile(audio, "output.wav")

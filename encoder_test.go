@@ -66,7 +66,7 @@ func TestEncodeWAV(t *testing.T) {
 	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
 	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
 	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data[0]))
+	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
 }
 
 func TestEncodeAIFF(t *testing.T) {
@@ -115,7 +115,7 @@ func TestEncodeAIFF(t *testing.T) {
 	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
 	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
 	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data[0]))
+	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
 }
 
 func TestEncodeMP3(t *testing.T) {
@@ -161,7 +161,7 @@ func TestEncodeMP3(t *testing.T) {
 	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
 	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
 	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data[0]))
+	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
 }
 
 func TestEncodeFLAC(t *testing.T) {
@@ -210,7 +210,7 @@ func TestEncodeFLAC(t *testing.T) {
 	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
 	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
 	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data[0]))
+	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
 }
 
 func TestEncodeUnsupportedFormat(t *testing.T) {
@@ -219,7 +219,7 @@ func TestEncodeUnsupportedFormat(t *testing.T) {
 		NumChannels: 2,
 		SampleRate:  44100,
 		BitDepth:    16,
-		Data:        [][]int{{0, 1, 2}, {3, 4, 5}},
+		Data:        []int{0, 1, 2, 3, 4, 5},
 		Duration:    0.001,
 	}
 
@@ -265,8 +265,12 @@ func TestEncodeRightChannel(t *testing.T) {
 	}
 
 	// Verify that the samples match the right channel of the original audio
-	originalRightChannel := audio.Data[1]
-	encodedChannel := decodedAudio.Data[0]
+	// Extract the right channel from interleaved data
+	originalRightChannel := make([]int, 0, len(audio.Data)/audio.NumChannels)
+	for i := 0; i < len(audio.Data); i += audio.NumChannels {
+		originalRightChannel = append(originalRightChannel, audio.Data[i+1])
+	}
+	encodedChannel := decodedAudio.Data
 
 	if len(originalRightChannel) != len(encodedChannel) {
 		t.Fatalf("Sample length mismatch: original %d, encoded %d", len(originalRightChannel), len(encodedChannel))
@@ -290,7 +294,7 @@ func TestSampleRateConversion(t *testing.T) {
 	}
 
 	originalSampleRate := audio.SampleRate
-	originalSamples := len(audio.Data[0])
+	originalSamples := len(audio.Data) / audio.NumChannels
 	t.Logf("Original sample rate: %d Hz, samples: %d", originalSampleRate, originalSamples)
 
 	// Test different target sample rates
@@ -338,7 +342,7 @@ func TestSampleRateConversion(t *testing.T) {
 
 			// Verify the number of samples is approximately correct (accounting for ratio)
 			expectedSamples := int(float64(originalSamples) * float64(tc.targetSampleRate) / float64(originalSampleRate))
-			actualSamples := len(decodedAudio.Data[0])
+			actualSamples := len(decodedAudio.Data) / decodedAudio.NumChannels
 			tolerance := int(float64(expectedSamples) * 0.01) // 1% tolerance
 			if actualSamples < expectedSamples-tolerance || actualSamples > expectedSamples+tolerance {
 				t.Errorf("Sample count mismatch: expected ~%d, got %d", expectedSamples, actualSamples)
@@ -401,7 +405,7 @@ func TestInvalidInterpolationMethod(t *testing.T) {
 		NumChannels: 1,
 		SampleRate:  44100,
 		BitDepth:    16,
-		Data:        [][]int{{0, 100, 200, 300, 400}},
+		Data:        []int{0, 100, 200, 300, 400},
 		Duration:    0.0001,
 	}
 
@@ -423,7 +427,7 @@ func TestBitDepthConversion(t *testing.T) {
 	}
 
 	originalBitDepth := audio.BitDepth
-	originalSamples := len(audio.Data[0])
+	originalSamples := len(audio.Data) / audio.NumChannels
 	t.Logf("Original bit depth: %d bits, samples: %d", originalBitDepth, originalSamples)
 
 	// Test different target bit depths
@@ -465,8 +469,8 @@ func TestBitDepthConversion(t *testing.T) {
 			}
 
 			// Verify the number of samples is preserved
-			if len(decodedAudio.Data[0]) != originalSamples {
-				t.Errorf("Sample count mismatch: expected %d, got %d", originalSamples, len(decodedAudio.Data[0]))
+			if len(decodedAudio.Data)/decodedAudio.NumChannels != originalSamples {
+				t.Errorf("Sample count mismatch: expected %d, got %d", originalSamples, len(decodedAudio.Data)/decodedAudio.NumChannels)
 			}
 
 			t.Logf("Successfully converted bit depth from %d to %d bits", originalBitDepth, tc.targetBitDepth)
@@ -521,7 +525,7 @@ func TestInvalidBitDepth(t *testing.T) {
 		NumChannels: 1,
 		SampleRate:  44100,
 		BitDepth:    16,
-		Data:        [][]int{{0, 100, 200, 300, 400}},
+		Data:        []int{0, 100, 200, 300, 400},
 		Duration:    0.0001,
 	}
 

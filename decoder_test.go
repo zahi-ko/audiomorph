@@ -1,6 +1,8 @@
 package audiomorph
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -31,13 +33,8 @@ func TestDecodeWAV(t *testing.T) {
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data) != audio.NumChannels {
-		t.Errorf("Expected Data to have %d channels, got %d", audio.NumChannels, len(audio.Data))
-	}
-	for ch := 0; ch < audio.NumChannels; ch++ {
-		if len(audio.Data[ch]) == 0 {
-			t.Errorf("Expected audio Data[%d] to be non-empty", ch)
-		}
+	if len(audio.Data)%audio.NumChannels != 0 {
+		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
 	}
 	if audio.Duration <= 0 {
 		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
@@ -47,7 +44,7 @@ func TestDecodeWAV(t *testing.T) {
 	t.Logf("  NumChannels: %d", audio.NumChannels)
 	t.Logf("  SampleRate: %d", audio.SampleRate)
 	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d samples per channel", len(audio.Data[0]))
+	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
 	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
@@ -77,13 +74,8 @@ func TestDecodeAIFF(t *testing.T) {
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data) != audio.NumChannels {
-		t.Errorf("Expected Data to have %d channels, got %d", audio.NumChannels, len(audio.Data))
-	}
-	for ch := 0; ch < audio.NumChannels; ch++ {
-		if len(audio.Data[ch]) == 0 {
-			t.Errorf("Expected audio Data[%d] to be non-empty", ch)
-		}
+	if len(audio.Data)%audio.NumChannels != 0 {
+		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
 	}
 	if audio.Duration <= 0 {
 		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
@@ -93,7 +85,7 @@ func TestDecodeAIFF(t *testing.T) {
 	t.Logf("  NumChannels: %d", audio.NumChannels)
 	t.Logf("  SampleRate: %d", audio.SampleRate)
 	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d samples per channel", len(audio.Data[0]))
+	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
 	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
@@ -123,13 +115,8 @@ func TestDecodeMP3(t *testing.T) {
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data) != audio.NumChannels {
-		t.Errorf("Expected Data to have %d channels, got %d", audio.NumChannels, len(audio.Data))
-	}
-	for ch := 0; ch < audio.NumChannels; ch++ {
-		if len(audio.Data[ch]) == 0 {
-			t.Errorf("Expected audio Data[%d] to be non-empty", ch)
-		}
+	if len(audio.Data)%audio.NumChannels != 0 {
+		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
 	}
 	if audio.Duration <= 0 {
 		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
@@ -139,7 +126,7 @@ func TestDecodeMP3(t *testing.T) {
 	t.Logf("  NumChannels: %d", audio.NumChannels)
 	t.Logf("  SampleRate: %d", audio.SampleRate)
 	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d samples per channel", len(audio.Data[0]))
+	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
 	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
@@ -169,13 +156,8 @@ func TestDecodeOGG(t *testing.T) {
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data) != audio.NumChannels {
-		t.Errorf("Expected Data to have %d channels, got %d", audio.NumChannels, len(audio.Data))
-	}
-	for ch := 0; ch < audio.NumChannels; ch++ {
-		if len(audio.Data[ch]) == 0 {
-			t.Errorf("Expected audio Data[%d] to be non-empty", ch)
-		}
+	if len(audio.Data)%audio.NumChannels != 0 {
+		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
 	}
 	if audio.Duration <= 0 {
 		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
@@ -185,7 +167,7 @@ func TestDecodeOGG(t *testing.T) {
 	t.Logf("  NumChannels: %d", audio.NumChannels)
 	t.Logf("  SampleRate: %d", audio.SampleRate)
 	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d samples per channel", len(audio.Data[0]))
+	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
 	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
@@ -215,13 +197,8 @@ func TestDecodeFLAC(t *testing.T) {
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data) != audio.NumChannels {
-		t.Errorf("Expected Data to have %d channels, got %d", audio.NumChannels, len(audio.Data))
-	}
-	for ch := 0; ch < audio.NumChannels; ch++ {
-		if len(audio.Data[ch]) == 0 {
-			t.Errorf("Expected audio Data[%d] to be non-empty", ch)
-		}
+	if len(audio.Data)%audio.NumChannels != 0 {
+		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
 	}
 	if audio.Duration <= 0 {
 		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
@@ -231,7 +208,7 @@ func TestDecodeFLAC(t *testing.T) {
 	t.Logf("  NumChannels: %d", audio.NumChannels)
 	t.Logf("  SampleRate: %d", audio.SampleRate)
 	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d samples per channel", len(audio.Data[0]))
+	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
 	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
@@ -241,5 +218,86 @@ func TestDecodeUnsupportedFormat(t *testing.T) {
 	_, err := DecodeFile(filename)
 	if err == nil {
 		t.Fatal("Expected error for unsupported format, got nil")
+	}
+}
+
+func TestDetectFormat(t *testing.T) {
+	testCases := []struct {
+		filename string
+		want     string
+	}{
+		{"wilhelm.wav", "wav"},
+		{"wilhelm.aiff", "aiff"},
+		{"wilhelm.mp3", "mp3"},
+		{"wilhelm.ogg", "ogg"},
+		{"wilhelm.flac", "flac"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.filename, func(t *testing.T) {
+			f, err := os.Open(filepath.Join("data", tc.filename))
+			if err != nil {
+				t.Fatalf("Failed to open file: %v", err)
+			}
+			defer f.Close()
+
+			got, err := DetectFormat(f)
+			if err != nil {
+				t.Fatalf("Failed to detect format: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Format mismatch: expected %s, got %s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestDecodeAudioFromReader(t *testing.T) {
+	testCases := []struct {
+		filename string
+		want     string
+	}{
+		{"wilhelm.wav", "wav"},
+		{"wilhelm.aiff", "aiff"},
+		{"wilhelm.mp3", "mp3"},
+		{"wilhelm.ogg", "ogg"},
+		{"wilhelm.flac", "flac"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.filename, func(t *testing.T) {
+			fileData, err := os.ReadFile(filepath.Join("data", tc.filename))
+			if err != nil {
+				t.Fatalf("Failed to read file: %v", err)
+			}
+
+			audio, err := Decode(bytes.NewReader(fileData))
+			if err != nil {
+				t.Fatalf("Failed to decode from reader: %v", err)
+			}
+
+			if audio.Format != tc.want {
+				t.Errorf("Format mismatch: expected %s, got %s", tc.want, audio.Format)
+			}
+			if audio.NumChannels <= 0 || audio.SampleRate <= 0 {
+				t.Errorf("Expected valid format info, got channels=%d rate=%d", audio.NumChannels, audio.SampleRate)
+			}
+			if len(audio.Data) == 0 {
+				t.Error("Expected audio Data to be non-empty")
+			}
+			if audio.Duration <= 0 {
+				t.Errorf("Expected Duration > 0, got %f", audio.Duration)
+			}
+		})
+	}
+}
+
+func TestDecodeFileSetsFormat(t *testing.T) {
+	audio, err := DecodeFile(filepath.Join("data", "wilhelm.ogg"))
+	if err != nil {
+		t.Fatalf("Failed to decode OGG file: %v", err)
+	}
+	if audio.Format != "ogg" {
+		t.Errorf("Expected Format \"ogg\", got %q", audio.Format)
 	}
 }

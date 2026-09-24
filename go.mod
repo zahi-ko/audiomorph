@@ -1,4 +1,4 @@
-module github.com/schollz/audiomorph
+module github.com/zahi-ko/audiomorph
 
 go 1.25
 
