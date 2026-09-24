@@ -1,10 +1,10 @@
 package audiomorph
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
@@ -14,162 +14,157 @@ import (
 	"github.com/mewkiz/flac"
 )
 
-// DecodeFile decodes a WAV, AIF/AIFF, MP3, OGG, or FLAC file and returns an Audio struct
+// DecodeFile opens the file at filename and decodes it.
+// The format is detected automatically by content sniffing.
 func DecodeFile(filename string) (*Audio, error) {
-	ext := strings.ToLower(filepath.Ext(filename))
-
-	switch ext {
-	case ".wav":
-		return decodeWAV(filename)
-	case ".aif", ".aiff":
-		return decodeAIFF(filename)
-	case ".mp3":
-		return decodeMP3(filename)
-	case ".ogg":
-		return decodeOGG(filename)
-	case ".flac":
-		return decodeFLAC(filename)
-	default:
-		return nil, fmt.Errorf("unsupported file format: %s", ext)
-	}
-}
-
-// decodeWAV decodes a WAV file
-func decodeWAV(filename string) (*Audio, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open WAV file: %w", err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer f.Close()
 
-	decoder := wav.NewDecoder(f)
+	return Decode(f)
+}
+
+// Decode decodes audio from an io.ReadSeeker and returns an Audio struct.
+// The format is detected automatically by sniffing the leading bytes.
+func Decode(r io.ReadSeeker) (*Audio, error) {
+	format, err := DetectFormat(r)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek to start: %w", err)
+	}
+
+	switch format {
+	case "wav":
+		return decodeWAV(r)
+	case "aiff":
+		return decodeAIFF(r)
+	case "mp3":
+		return decodeMP3(r)
+	case "ogg":
+		return decodeOGG(r)
+	case "flac":
+		return decodeFLAC(r)
+	default:
+		return nil, fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+// DetectFormat sniffs the leading bytes of r to identify the audio format.
+// It returns one of "wav", "aiff", "mp3", "ogg", "flac", or an error if the
+// format is not recognized. The read position is restored to the start.
+func DetectFormat(r io.ReadSeeker) (string, error) {
+	header := make([]byte, 12)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return "", fmt.Errorf("failed to read file header: %w", err)
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("failed to rewind stream: %w", err)
+	}
+
+	switch {
+	case bytes.Equal(header[0:4], []byte("RIFF")) && bytes.Equal(header[8:12], []byte("WAVE")):
+		return "wav", nil
+	case bytes.Equal(header[0:4], []byte("FORM")) &&
+		(bytes.Equal(header[8:12], []byte("AIFF")) || bytes.Equal(header[8:12], []byte("AIFC"))):
+		return "aiff", nil
+	case bytes.Equal(header[0:4], []byte("OggS")):
+		return "ogg", nil
+	case bytes.Equal(header[0:4], []byte("fLaC")):
+		return "flac", nil
+	case bytes.Equal(header[0:3], []byte("ID3")),
+		header[0] == 0xFF && header[1]&0xE0 == 0xE0: // MPEG frame sync
+		return "mp3", nil
+	default:
+		return "", fmt.Errorf("unsupported or unrecognized audio format")
+	}
+}
+
+// decodeWAV decodes a WAV stream. Data is kept interleaved.
+func decodeWAV(r io.ReadSeeker) (*Audio, error) {
+	decoder := wav.NewDecoder(r)
 	if !decoder.IsValidFile() {
 		return nil, fmt.Errorf("invalid WAV file")
 	}
 
-	// Read the format information
+	// Forward to the PCM data section and read the format information
 	if err := decoder.FwdToPCM(); err != nil {
 		return nil, fmt.Errorf("failed to forward to PCM data: %w", err)
 	}
-
-	// Get audio format
 	format := decoder.Format()
 
-	// Read all PCM data
 	buf, err := decoder.FullPCMBuffer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read PCM buffer: %w", err)
 	}
 
-	// Deinterlace PCM data from []int to [][]int
 	numChannels := int(format.NumChannels)
 	numSamples := len(buf.Data) / numChannels
-	data := make([][]int, numChannels)
-	for ch := 0; ch < numChannels; ch++ {
-		data[ch] = make([]int, numSamples)
-	}
-
-	for i := 0; i < len(buf.Data); i++ {
-		ch := i % numChannels
-		sample := i / numChannels
-		data[ch][sample] = buf.Data[i]
-	}
-
-	// Calculate duration
-	duration := float64(numSamples) / float64(format.SampleRate)
 
 	return &Audio{
-		NumChannels: int(format.NumChannels),
+		NumChannels: numChannels,
 		SampleRate:  int(format.SampleRate),
 		BitDepth:    int(decoder.BitDepth),
-		Data:        data,
-		Duration:    duration,
+		Format:      "wav",
+		Data:        buf.Data,
+		Duration:    float64(numSamples) / float64(format.SampleRate),
 	}, nil
 }
 
-// decodeAIFF decodes an AIFF/AIF file
-func decodeAIFF(filename string) (*Audio, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open AIFF file: %w", err)
-	}
-	defer f.Close()
-
-	decoder := aiff.NewDecoder(f)
+// decodeAIFF decodes an AIFF/AIFC stream. Data is kept interleaved.
+func decodeAIFF(r io.ReadSeeker) (*Audio, error) {
+	decoder := aiff.NewDecoder(r)
 	if !decoder.IsValidFile() {
 		return nil, fmt.Errorf("invalid AIFF file")
 	}
 
-	// Read all PCM data
 	buf, err := decoder.FullPCMBuffer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read PCM buffer: %w", err)
 	}
 
-	// Deinterlace PCM data from []int to [][]int
 	format := buf.Format
 	numChannels := int(format.NumChannels)
 	numSamples := len(buf.Data) / numChannels
-	data := make([][]int, numChannels)
-	for ch := 0; ch < numChannels; ch++ {
-		data[ch] = make([]int, numSamples)
-	}
-
-	for i := 0; i < len(buf.Data); i++ {
-		ch := i % numChannels
-		sample := i / numChannels
-		data[ch][sample] = buf.Data[i]
-	}
-
-	// Calculate duration
-	duration := float64(numSamples) / float64(format.SampleRate)
 
 	return &Audio{
-		NumChannels: int(format.NumChannels),
+		NumChannels: numChannels,
 		SampleRate:  int(format.SampleRate),
 		BitDepth:    int(decoder.BitDepth),
-		Data:        data,
-		Duration:    duration,
+		Format:      "aiff",
+		Data:        buf.Data,
+		Duration:    float64(numSamples) / float64(format.SampleRate),
 	}, nil
 }
 
-// decodeMP3 decodes an MP3 file
-func decodeMP3(filename string) (*Audio, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open MP3 file: %w", err)
-	}
-	defer f.Close()
-
-	streamer, format, err := mp3.Decode(f)
+// decodeMP3 decodes an MP3 stream. Data is kept interleaved.
+func decodeMP3(r io.ReadSeeker) (*Audio, error) {
+	streamer, format, err := mp3.Decode(nopReadSeekCloser{r})
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode MP3 file: %w", err)
 	}
 	defer streamer.Close()
 
-	return streamToAudio(streamer, format)
+	return streamToAudio(streamer, format, "mp3")
 }
 
-// decodeOGG decodes an OGG Vorbis file
-func decodeOGG(filename string) (*Audio, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open OGG file: %w", err)
-	}
-	defer f.Close()
-
-	streamer, format, err := vorbis.Decode(f)
+// decodeOGG decodes an OGG Vorbis stream. Data is kept interleaved.
+func decodeOGG(r io.ReadSeeker) (*Audio, error) {
+	streamer, format, err := vorbis.Decode(nopReadSeekCloser{r})
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode OGG file: %w", err)
 	}
 	defer streamer.Close()
 
-	return streamToAudio(streamer, format)
+	return streamToAudio(streamer, format, "ogg")
 }
 
-// decodeFLAC decodes a FLAC file
-func decodeFLAC(filename string) (*Audio, error) {
-	stream, err := flac.ParseFile(filename)
+// decodeFLAC decodes a FLAC stream. Data is kept interleaved.
+func decodeFLAC(r io.Reader) (*Audio, error) {
+	stream, err := flac.Parse(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse FLAC file: %w", err)
 	}
@@ -182,11 +177,7 @@ func decodeFLAC(filename string) (*Audio, error) {
 	bitDepth := int(info.BitsPerSample)
 	totalSamples := int(info.NSamples)
 
-	// Initialize deinterlaced data structure
-	data := make([][]int, numChannels)
-	for ch := 0; ch < numChannels; ch++ {
-		data[ch] = make([]int, 0, totalSamples)
-	}
+	data := make([]int, 0, totalSamples*numChannels)
 
 	// Read all frames
 	for {
@@ -195,38 +186,35 @@ func decodeFLAC(filename string) (*Audio, error) {
 			break
 		}
 
-		// Process each subframe (channel)
+		// Append samples interleaved
 		for i := 0; i < len(frame.Subframes[0].Samples); i++ {
 			for ch := 0; ch < numChannels; ch++ {
-				sample := frame.Subframes[ch].Samples[i]
-				data[ch] = append(data[ch], int(sample))
+				data = append(data, int(frame.Subframes[ch].Samples[i]))
 			}
 		}
 	}
 
-	// Calculate duration
-	duration := float64(totalSamples) / float64(sampleRate)
+	numSamples := len(data) / numChannels
 
 	return &Audio{
 		NumChannels: numChannels,
 		SampleRate:  sampleRate,
 		BitDepth:    bitDepth,
+		Format:      "flac",
 		Data:        data,
-		Duration:    duration,
+		Duration:    float64(numSamples) / float64(sampleRate),
 	}, nil
 }
 
-// streamToAudio converts a beep.StreamSeekCloser to an Audio struct
-func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format) (*Audio, error) {
-	// Get the total number of samples
+// streamToAudio converts a beep.StreamSeekCloser to an Audio struct with
+// interleaved data.
+func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format, formatName string) (*Audio, error) {
 	length := streamer.Len()
-
-	// Initialize deinterlaced data structure
 	numChannels := format.NumChannels
-	data := make([][]int, numChannels)
-	for ch := 0; ch < numChannels; ch++ {
-		data[ch] = make([]int, 0, length)
-	}
+	bitDepth := format.Precision * 8
+	maxVal := float64(int64(1) << uint(bitDepth-1))
+
+	data := make([]int, 0, length*numChannels)
 
 	bufSize := 512
 	buf := make([][2]float64, bufSize)
@@ -240,13 +228,8 @@ func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format) (*Audio, 
 
 		for i := 0; i < n; i++ {
 			for ch := 0; ch < numChannels; ch++ {
-				// Convert float64 [-1, 1] to int based on precision
-				sample := buf[i][ch]
-				// Scale by bit depth (precision is in bytes)
-				bitDepth := format.Precision * 8
-				maxVal := float64(int64(1) << uint(bitDepth-1))
-				intVal := int(sample * maxVal)
-				data[ch] = append(data[ch], intVal)
+				// Convert float64 [-1, 1] back to integer PCM
+				data = append(data, int(buf[i][ch]*maxVal))
 			}
 		}
 		totalRead += n
@@ -256,15 +239,20 @@ func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format) (*Audio, 
 		}
 	}
 
-	// Calculate duration
-	numSamples := len(data[0])
-	duration := float64(numSamples) / float64(format.SampleRate)
+	numSamples := len(data) / numChannels
 
 	return &Audio{
-		NumChannels: format.NumChannels,
+		NumChannels: numChannels,
 		SampleRate:  int(format.SampleRate),
-		BitDepth:    format.Precision * 8,
+		BitDepth:    bitDepth,
+		Format:      formatName,
 		Data:        data,
-		Duration:    duration,
+		Duration:    float64(numSamples) / float64(format.SampleRate),
 	}, nil
 }
+
+// nopReadSeekCloser adapts an io.ReadSeeker to io.ReadCloser with a no-op
+// Close, so beep decoders can consume streams owned by the caller.
+type nopReadSeekCloser struct{ io.ReadSeeker }
+
+func (nopReadSeekCloser) Close() error { return nil }

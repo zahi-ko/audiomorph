@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/schollz/audiomorph"
 	"github.com/spf13/cobra"
+	"github.com/zahi-ko/audiomorph"
 )
 
 // Version is the version of the audiomorph utility
@@ -92,12 +92,13 @@ func displayStatistics(filename string, audio *audiomorph.Audio) {
 	fmt.Printf("Audio File Statistics\n")
 	fmt.Printf("=====================\n")
 	fmt.Printf("File:         %s\n", filepath.Base(filename))
-	fmt.Printf("Format:       %s\n", filepath.Ext(filename))
+	fmt.Printf("Format:       %s (detected)\n", audio.Format)
 	fmt.Printf("Channels:     %d\n", audio.NumChannels)
 	fmt.Printf("Sample Rate:  %d Hz\n", audio.SampleRate)
 	fmt.Printf("Bit Depth:    %d bits\n", audio.BitDepth)
 	fmt.Printf("Duration:     %.2f seconds\n", audio.Duration)
-	fmt.Printf("Samples:      %d per channel\n", len(audio.Data[0]))
+	fmt.Printf("Samples:      %d interleaved (%d per channel)\n",
+		len(audio.Data), len(audio.Data)/audio.NumChannels)
 
 	// Calculate file size
 	fileInfo, err := os.Stat(filename)

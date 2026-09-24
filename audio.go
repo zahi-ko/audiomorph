@@ -5,7 +5,8 @@ type Audio struct {
 	NumChannels         int
 	SampleRate          int
 	BitDepth            int
-	Data                [][]int // Data[channel][sample] - deinterlaced audio data
+	Format              string  // Detected source format: "wav", "aiff", "mp3", "ogg", "flac"
+	Data                []int   // Interleaved PCM data: Data[sample*NumChannels + channel]
 	Duration            float64 // in seconds
 	useChannels         []int
 	targetSampleRate    int
