@@ -91,9 +91,9 @@ func monoDownmix(data []int, numChannels int) []int {
 
 	numSamples := len(data) / numChannels
 	out := make([]int, 0, numSamples)
-	for i := 0; i < numSamples; i++ {
+	for i := range numSamples {
 		sum := 0
-		for ch := 0; ch < numChannels; ch++ {
+		for ch := range numChannels {
 			sum += data[i*numChannels+ch]
 		}
 		out = append(out, sum/numChannels)
