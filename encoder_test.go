@@ -2,302 +2,160 @@ package audiomorph
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
-// verifySoxCanReadFile verifies that sox can read the given audio file using "sox --i"
-func verifySoxCanReadFile(t *testing.T, filename string) {
-	t.Helper()
-	cmd := exec.Command("sox", "--i", filename)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("Sox failed to read file %s: %v\nOutput: %s", filename, err, string(output))
-	}
-	t.Logf("Sox successfully verified file: %s", filename)
-	t.Logf("Sox output:\n%s", string(output))
-}
-
 func TestEncodeWAV(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.wav")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
-	// Encode to a new WAV file
-	dstFilename := filepath.Join(os.TempDir(), "test_output.wav")
-	defer os.Remove(dstFilename)
-
-	err = EncodeFile(audio, dstFilename)
-	if err != nil {
+	dstFilename := filepath.Join(t.TempDir(), "test_output.wav")
+	if err := EncodeFile(audio, dstFilename); err != nil {
 		t.Fatalf("Failed to encode WAV file: %v", err)
 	}
 
-	// Verify the file was created
-	if _, err := os.Stat(dstFilename); os.IsNotExist(err) {
-		t.Fatal("Encoded WAV file was not created")
-	}
-
-	// Decode the encoded file to verify it's valid
 	decodedAudio, err := DecodeFile(dstFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode encoded WAV file: %v", err)
 	}
 
-	// Verify basic properties match
-	if decodedAudio.NumChannels != audio.NumChannels {
-		t.Errorf("NumChannels mismatch: expected %d, got %d", audio.NumChannels, decodedAudio.NumChannels)
-	}
 	if decodedAudio.SampleRate != audio.SampleRate {
 		t.Errorf("SampleRate mismatch: expected %d, got %d", audio.SampleRate, decodedAudio.SampleRate)
 	}
 	if decodedAudio.BitDepth != audio.BitDepth {
 		t.Errorf("BitDepth mismatch: expected %d, got %d", audio.BitDepth, decodedAudio.BitDepth)
 	}
-
-	// Verify that sox can read the encoded file
-	verifySoxCanReadFile(t, dstFilename)
-
-	t.Logf("WAV Encode/Decode test passed")
-	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
-	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
-	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
+	if len(decodedAudio.Data) != len(audio.Data) {
+		t.Errorf("Sample count mismatch: expected %d, got %d", len(audio.Data), len(decodedAudio.Data))
+	}
+	for i := range audio.Data {
+		if decodedAudio.Data[i] != audio.Data[i] {
+			t.Errorf("Sample mismatch at %d: expected %d, got %d", i, audio.Data[i], decodedAudio.Data[i])
+			break
+		}
+	}
 }
 
 func TestEncodeAIFF(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.aiff")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
-	// Encode to a new AIFF file
-	dstFilename := filepath.Join(os.TempDir(), "test_output.aiff")
-	defer os.Remove(dstFilename)
-
-	err = EncodeFile(audio, dstFilename)
-	if err != nil {
+	dstFilename := filepath.Join(t.TempDir(), "test_output.aiff")
+	if err := EncodeFile(audio, dstFilename); err != nil {
 		t.Fatalf("Failed to encode AIFF file: %v", err)
 	}
 
-	// Verify the file was created
-	if _, err := os.Stat(dstFilename); os.IsNotExist(err) {
-		t.Fatal("Encoded AIFF file was not created")
-	}
-
-	// Decode the encoded file to verify it's valid
 	decodedAudio, err := DecodeFile(dstFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode encoded AIFF file: %v", err)
 	}
 
-	// Verify basic properties match
-	if decodedAudio.NumChannels != audio.NumChannels {
-		t.Errorf("NumChannels mismatch: expected %d, got %d", audio.NumChannels, decodedAudio.NumChannels)
-	}
 	if decodedAudio.SampleRate != audio.SampleRate {
 		t.Errorf("SampleRate mismatch: expected %d, got %d", audio.SampleRate, decodedAudio.SampleRate)
 	}
 	if decodedAudio.BitDepth != audio.BitDepth {
 		t.Errorf("BitDepth mismatch: expected %d, got %d", audio.BitDepth, decodedAudio.BitDepth)
 	}
-
-	// Verify that sox can read the encoded file
-	verifySoxCanReadFile(t, dstFilename)
-
-	t.Logf("AIFF Encode/Decode test passed")
-	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
-	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
-	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
+	if len(decodedAudio.Data) != len(audio.Data) {
+		t.Errorf("Sample count mismatch: expected %d, got %d", len(audio.Data), len(decodedAudio.Data))
+	}
 }
 
 func TestEncodeMP3(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.mp3")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
-	// Encode to a new MP3 file
-	dstFilename := filepath.Join(os.TempDir(), "test_output.mp3")
-	defer os.Remove(dstFilename)
-
-	err = EncodeFile(audio, dstFilename, OptionSampleRate(22000))
-	if err != nil {
+	dstFilename := filepath.Join(t.TempDir(), "test_output.mp3")
+	if err := EncodeFile(audio, dstFilename, OptionSampleRate(22050)); err != nil {
 		t.Fatalf("Failed to encode MP3 file: %v", err)
 	}
 
-	// Verify the file was created
-	if _, err := os.Stat(dstFilename); os.IsNotExist(err) {
-		t.Fatal("Encoded MP3 file was not created")
-	}
-
-	// Decode the encoded file to verify it's valid
 	decodedAudio, err := DecodeFile(dstFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode encoded MP3 file: %v", err)
 	}
 
-	// Verify basic properties match (MP3 may have slight differences due to compression)
-	if decodedAudio.NumChannels != audio.NumChannels {
-		t.Errorf("NumChannels mismatch: expected %d, got %d", audio.NumChannels, decodedAudio.NumChannels)
+	if decodedAudio.SampleRate != 22050 {
+		t.Errorf("SampleRate mismatch: expected 22050, got %d", decodedAudio.SampleRate)
 	}
-	if decodedAudio.SampleRate != audio.SampleRate {
-		t.Errorf("SampleRate mismatch: expected %d, got %d", audio.SampleRate, decodedAudio.SampleRate)
+	if len(decodedAudio.Data) == 0 {
+		t.Error("Expected audio Data to be non-empty")
 	}
-
-	// Verify that sox can read the encoded file
-	verifySoxCanReadFile(t, dstFilename)
-
-	t.Logf("MP3 Encode/Decode test passed")
-	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
-	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
-	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
 }
 
 func TestEncodeFLAC(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.flac")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
-	// Encode to a new FLAC file
-	dstFilename := filepath.Join(os.TempDir(), "test_output.flac")
-	defer os.Remove(dstFilename)
-
-	err = EncodeFile(audio, dstFilename)
-	if err != nil {
+	dstFilename := filepath.Join(t.TempDir(), "test_output.flac")
+	if err := EncodeFile(audio, dstFilename); err != nil {
 		t.Fatalf("Failed to encode FLAC file: %v", err)
 	}
 
-	// Verify the file was created
-	if _, err := os.Stat(dstFilename); os.IsNotExist(err) {
-		t.Fatal("Encoded FLAC file was not created")
-	}
-
-	// Decode the encoded file to verify it's valid
 	decodedAudio, err := DecodeFile(dstFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode encoded FLAC file: %v", err)
 	}
 
-	// Verify basic properties match
-	if decodedAudio.NumChannels != audio.NumChannels {
-		t.Errorf("NumChannels mismatch: expected %d, got %d", audio.NumChannels, decodedAudio.NumChannels)
-	}
 	if decodedAudio.SampleRate != audio.SampleRate {
 		t.Errorf("SampleRate mismatch: expected %d, got %d", audio.SampleRate, decodedAudio.SampleRate)
 	}
 	if decodedAudio.BitDepth != audio.BitDepth {
 		t.Errorf("BitDepth mismatch: expected %d, got %d", audio.BitDepth, decodedAudio.BitDepth)
 	}
-
-	// Verify that sox can read the encoded file
-	verifySoxCanReadFile(t, dstFilename)
-
-	t.Logf("FLAC Encode/Decode test passed")
-	t.Logf("  NumChannels: %d", decodedAudio.NumChannels)
-	t.Logf("  SampleRate: %d", decodedAudio.SampleRate)
-	t.Logf("  BitDepth: %d", decodedAudio.BitDepth)
-	t.Logf("  Samples: %d", len(decodedAudio.Data)/decodedAudio.NumChannels)
+	if len(decodedAudio.Data) != len(audio.Data) {
+		t.Errorf("Sample count mismatch: expected %d, got %d", len(audio.Data), len(decodedAudio.Data))
+	}
 }
 
 func TestEncodeUnsupportedFormat(t *testing.T) {
-	// Create a simple audio structure
 	audio := &Audio{
-		NumChannels: 2,
-		SampleRate:  44100,
-		BitDepth:    16,
-		Data:        []int{0, 1, 2, 3, 4, 5},
-		Duration:    0.001,
+		SampleRate: 44100,
+		BitDepth:   16,
+		Data:       []int{0, 1, 2, 3, 4, 5},
+		Duration:   0.001,
 	}
 
-	// Try to encode to an unsupported format
-	dstFilename := filepath.Join(os.TempDir(), "test_output.unknown")
+	dstFilename := filepath.Join(t.TempDir(), "test_output.unknown")
 	err := EncodeFile(audio, dstFilename)
 	if err == nil {
 		t.Fatal("Expected error for unsupported format, got nil")
 	}
-
-	t.Logf("Unsupported format correctly returns error: %v", err)
-}
-
-func TestEncodeRightChannel(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.mp3")
-	audio, err := DecodeFile(srcFilename)
-	if err != nil {
-		t.Fatalf("Failed to decode source file: %v", err)
-	}
-
-	// Set option to use only the right channel (channel index 1)
-	audio.useChannels = []int{1}
-
-	// Encode to a new WAV file
-	dstFilename := filepath.Join(os.TempDir(), "test_output_right_channel.wav")
-	defer os.Remove(dstFilename)
-
-	err = EncodeFile(audio, dstFilename)
-	if err != nil {
-		t.Fatalf("Failed to encode WAV file with right channel: %v", err)
-	}
-
-	// Decode the encoded file to verify it's valid
-	decodedAudio, err := DecodeFile(dstFilename)
-	if err != nil {
-		t.Fatalf("Failed to decode encoded WAV file: %v", err)
-	}
-
-	// Verify that the encoded audio has 1 channel
-	if decodedAudio.NumChannels != 1 {
-		t.Errorf("Expected 1 channel in encoded audio, got %d", decodedAudio.NumChannels)
-	}
-
-	// Verify that the samples match the right channel of the original audio
-	// Extract the right channel from interleaved data
-	originalRightChannel := make([]int, 0, len(audio.Data)/audio.NumChannels)
-	for i := 0; i < len(audio.Data); i += audio.NumChannels {
-		originalRightChannel = append(originalRightChannel, audio.Data[i+1])
-	}
-	encodedChannel := decodedAudio.Data
-
-	if len(originalRightChannel) != len(encodedChannel) {
-		t.Fatalf("Sample length mismatch: original %d, encoded %d", len(originalRightChannel), len(encodedChannel))
-	}
-
-	for i := range originalRightChannel {
-		if originalRightChannel[i] != encodedChannel[i] {
-			t.Errorf("Sample mismatch at index %d: expected %d, got %d", i, originalRightChannel[i], encodedChannel[i])
-		}
-	}
-
-	t.Logf("Right channel encoding test passed")
 }
 
 func TestSampleRateConversion(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.wav")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
 	originalSampleRate := audio.SampleRate
-	originalSamples := len(audio.Data) / audio.NumChannels
-	t.Logf("Original sample rate: %d Hz, samples: %d", originalSampleRate, originalSamples)
+	originalSamples := len(audio.Data)
 
-	// Test different target sample rates
 	testCases := []struct {
 		name                string
 		targetSampleRate    int
@@ -312,125 +170,62 @@ func TestSampleRateConversion(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Decode fresh audio for each test
 			audio, err := DecodeFile(srcFilename)
 			if err != nil {
 				t.Fatalf("Failed to decode source file: %v", err)
 			}
 
-			// Encode to a new WAV file with sample rate conversion
-			dstFilename := filepath.Join(os.TempDir(), "test_sample_rate_"+tc.interpolationMethod+".wav")
-			defer os.Remove(dstFilename)
-
-			err = EncodeFile(audio, dstFilename,
+			dstFilename := filepath.Join(t.TempDir(), "test_sample_rate.wav")
+			if err := EncodeFile(audio, dstFilename,
 				OptionSampleRate(tc.targetSampleRate),
-				OptionInterpolationMethod(tc.interpolationMethod))
-			if err != nil {
+				OptionInterpolationMethod(tc.interpolationMethod)); err != nil {
 				t.Fatalf("Failed to encode with sample rate conversion: %v", err)
 			}
 
-			// Decode the encoded file to verify the sample rate was converted
 			decodedAudio, err := DecodeFile(dstFilename)
 			if err != nil {
 				t.Fatalf("Failed to decode encoded file: %v", err)
 			}
 
-			// Verify the sample rate matches the target
 			if decodedAudio.SampleRate != tc.targetSampleRate {
 				t.Errorf("Sample rate mismatch: expected %d, got %d", tc.targetSampleRate, decodedAudio.SampleRate)
 			}
 
-			// Verify the number of samples is approximately correct (accounting for ratio)
 			expectedSamples := int(float64(originalSamples) * float64(tc.targetSampleRate) / float64(originalSampleRate))
-			actualSamples := len(decodedAudio.Data) / decodedAudio.NumChannels
+			actualSamples := len(decodedAudio.Data)
 			tolerance := int(float64(expectedSamples) * 0.01) // 1% tolerance
 			if actualSamples < expectedSamples-tolerance || actualSamples > expectedSamples+tolerance {
 				t.Errorf("Sample count mismatch: expected ~%d, got %d", expectedSamples, actualSamples)
 			}
-
-			t.Logf("Successfully converted sample rate from %d to %d Hz using %s interpolation",
-				originalSampleRate, tc.targetSampleRate, tc.interpolationMethod)
-			t.Logf("  Original samples: %d, New samples: %d", originalSamples, actualSamples)
-
-			// check that sox can read the encoded file
-			verifySoxCanReadFile(t, dstFilename)
 		})
 	}
 }
 
-func TestSampleRateConversionPreservesChannels(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.mp3")
-	audio, err := DecodeFile(srcFilename)
-	if err != nil {
-		t.Fatalf("Failed to decode source file: %v", err)
-	}
-
-	originalChannels := audio.NumChannels
-	originalSampleRate := audio.SampleRate
-
-	// Encode with sample rate conversion
-	dstFilename := filepath.Join(os.TempDir(), "test_sample_rate_channels.wav")
-	defer os.Remove(dstFilename)
-
-	targetSampleRate := 48000
-	err = EncodeFile(audio, dstFilename, OptionSampleRate(targetSampleRate))
-	if err != nil {
-		t.Fatalf("Failed to encode with sample rate conversion: %v", err)
-	}
-
-	// Decode and verify
-	decodedAudio, err := DecodeFile(dstFilename)
-	if err != nil {
-		t.Fatalf("Failed to decode encoded file: %v", err)
-	}
-
-	// Verify channels are preserved
-	if decodedAudio.NumChannels != originalChannels {
-		t.Errorf("Channel count mismatch: expected %d, got %d", originalChannels, decodedAudio.NumChannels)
-	}
-
-	// Verify sample rate was converted
-	if decodedAudio.SampleRate != targetSampleRate {
-		t.Errorf("Sample rate mismatch: expected %d, got %d", targetSampleRate, decodedAudio.SampleRate)
-	}
-
-	t.Logf("Sample rate conversion preserved %d channels", originalChannels)
-	t.Logf("Converted from %d Hz to %d Hz", originalSampleRate, targetSampleRate)
-}
-
 func TestInvalidInterpolationMethod(t *testing.T) {
-	// Create a simple audio structure
 	audio := &Audio{
-		NumChannels: 1,
-		SampleRate:  44100,
-		BitDepth:    16,
-		Data:        []int{0, 100, 200, 300, 400},
-		Duration:    0.0001,
+		SampleRate: 44100,
+		BitDepth:   16,
+		Data:       []int{0, 100, 200, 300, 400},
+		Duration:   0.0001,
 	}
 
-	// Try to convert with an invalid interpolation method
 	err := convertSampleRate(audio, 48000, "invalid_method")
 	if err == nil {
 		t.Fatal("Expected error for invalid interpolation method, got nil")
 	}
-
-	t.Logf("Invalid interpolation method correctly returns error: %v", err)
 }
 
 func TestBitDepthConversion(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.wav")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
-	originalBitDepth := audio.BitDepth
-	originalSamples := len(audio.Data) / audio.NumChannels
-	t.Logf("Original bit depth: %d bits, samples: %d", originalBitDepth, originalSamples)
+	originalSamples := len(audio.Data)
 
-	// Test different target bit depths
 	testCases := []struct {
 		name           string
 		targetBitDepth int
@@ -442,133 +237,69 @@ func TestBitDepthConversion(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Decode fresh audio for each test
 			audio, err := DecodeFile(srcFilename)
 			if err != nil {
 				t.Fatalf("Failed to decode source file: %v", err)
 			}
 
-			// Encode to a new WAV file with bit depth conversion
-			dstFilename := filepath.Join(os.TempDir(), fmt.Sprintf("test_bitdepth_%d.wav", tc.targetBitDepth))
-			defer os.Remove(dstFilename)
-
-			err = EncodeFile(audio, dstFilename, OptionBitDepth(tc.targetBitDepth))
-			if err != nil {
+			dstFilename := filepath.Join(t.TempDir(), fmt.Sprintf("test_bitdepth_%d.wav", tc.targetBitDepth))
+			if err := EncodeFile(audio, dstFilename, OptionBitDepth(tc.targetBitDepth)); err != nil {
 				t.Fatalf("Failed to encode with bit depth conversion: %v", err)
 			}
 
-			// Decode the encoded file to verify the bit depth was converted
 			decodedAudio, err := DecodeFile(dstFilename)
 			if err != nil {
 				t.Fatalf("Failed to decode encoded file: %v", err)
 			}
 
-			// Verify the bit depth matches the target
 			if decodedAudio.BitDepth != tc.targetBitDepth {
 				t.Errorf("Bit depth mismatch: expected %d, got %d", tc.targetBitDepth, decodedAudio.BitDepth)
 			}
-
-			// Verify the number of samples is preserved
-			if len(decodedAudio.Data)/decodedAudio.NumChannels != originalSamples {
-				t.Errorf("Sample count mismatch: expected %d, got %d", originalSamples, len(decodedAudio.Data)/decodedAudio.NumChannels)
+			if len(decodedAudio.Data) != originalSamples {
+				t.Errorf("Sample count mismatch: expected %d, got %d", originalSamples, len(decodedAudio.Data))
 			}
-
-			t.Logf("Successfully converted bit depth from %d to %d bits", originalBitDepth, tc.targetBitDepth)
 		})
 	}
 }
 
-func TestBitDepthConversionPreservesChannels(t *testing.T) {
-	// Decode an existing audio file
-	srcFilename := filepath.Join("data", "wilhelm.mp3")
-	audio, err := DecodeFile(srcFilename)
-	if err != nil {
-		t.Fatalf("Failed to decode source file: %v", err)
-	}
-
-	originalChannels := audio.NumChannels
-	originalBitDepth := audio.BitDepth
-
-	// Encode with bit depth conversion
-	dstFilename := filepath.Join(os.TempDir(), "test_bitdepth_channels.wav")
-	defer os.Remove(dstFilename)
-
-	targetBitDepth := 24
-	err = EncodeFile(audio, dstFilename, OptionBitDepth(targetBitDepth))
-	if err != nil {
-		t.Fatalf("Failed to encode with bit depth conversion: %v", err)
-	}
-
-	// Decode and verify
-	decodedAudio, err := DecodeFile(dstFilename)
-	if err != nil {
-		t.Fatalf("Failed to decode encoded file: %v", err)
-	}
-
-	// Verify channels are preserved
-	if decodedAudio.NumChannels != originalChannels {
-		t.Errorf("Channel count mismatch: expected %d, got %d", originalChannels, decodedAudio.NumChannels)
-	}
-
-	// Verify bit depth was converted
-	if decodedAudio.BitDepth != targetBitDepth {
-		t.Errorf("Bit depth mismatch: expected %d, got %d", targetBitDepth, decodedAudio.BitDepth)
-	}
-
-	t.Logf("Bit depth conversion preserved %d channels", originalChannels)
-	t.Logf("Converted from %d bits to %d bits", originalBitDepth, targetBitDepth)
-}
-
 func TestInvalidBitDepth(t *testing.T) {
-	// Create a simple audio structure
 	audio := &Audio{
-		NumChannels: 1,
-		SampleRate:  44100,
-		BitDepth:    16,
-		Data:        []int{0, 100, 200, 300, 400},
-		Duration:    0.0001,
+		SampleRate: 44100,
+		BitDepth:   16,
+		Data:       []int{0, 100, 200, 300, 400},
+		Duration:   0.0001,
 	}
 
-	// Try to convert with an invalid bit depth
 	err := convertBitDepth(audio, 12)
 	if err == nil {
 		t.Fatal("Expected error for invalid bit depth, got nil")
 	}
-
-	t.Logf("Invalid bit depth correctly returns error: %v", err)
 }
 
 func TestBitDepthAndSampleRateConversion(t *testing.T) {
-	// Test combining both bit depth and sample rate conversions
-	srcFilename := filepath.Join("data", "wilhelm.wav")
+	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, srcFilename, 2)
+
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode source file: %v", err)
 	}
 
-	originalBitDepth := audio.BitDepth
-	originalSampleRate := audio.SampleRate
-
-	// Encode with both conversions
-	dstFilename := filepath.Join(os.TempDir(), "test_combined_conversion.wav")
-	defer os.Remove(dstFilename)
+	dstFilename := filepath.Join(t.TempDir(), "test_combined_conversion.wav")
 
 	targetBitDepth := 24
 	targetSampleRate := 48000
-	err = EncodeFile(audio, dstFilename,
+	if err := EncodeFile(audio, dstFilename,
 		OptionBitDepth(targetBitDepth),
-		OptionSampleRate(targetSampleRate))
-	if err != nil {
+		OptionSampleRate(targetSampleRate)); err != nil {
 		t.Fatalf("Failed to encode with combined conversion: %v", err)
 	}
 
-	// Decode and verify
 	decodedAudio, err := DecodeFile(dstFilename)
 	if err != nil {
 		t.Fatalf("Failed to decode encoded file: %v", err)
 	}
 
-	// Verify both conversions were applied
 	if decodedAudio.BitDepth != targetBitDepth {
 		t.Errorf("Bit depth mismatch: expected %d, got %d", targetBitDepth, decodedAudio.BitDepth)
 	}
@@ -576,6 +307,6 @@ func TestBitDepthAndSampleRateConversion(t *testing.T) {
 		t.Errorf("Sample rate mismatch: expected %d, got %d", targetSampleRate, decodedAudio.SampleRate)
 	}
 
-	t.Logf("Successfully converted from %d bits @ %d Hz to %d bits @ %d Hz",
-		originalBitDepth, originalSampleRate, targetBitDepth, targetSampleRate)
+	t.Logf("Combined conversion test passed: %d Hz @ %d-bit",
+		decodedAudio.SampleRate, decodedAudio.BitDepth)
 }

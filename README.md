@@ -9,7 +9,7 @@ A Go library and CLI tool for decoding and encoding audio files across multiple 
 
 ## How It Works
 
-audiomorph decodes audio files into a common in-memory representation (`Audio` struct) containing interleaved PCM data, then encodes that data to your desired output format. The input format is detected automatically by content sniffing, so files do not need a correct extension. The library handles format-specific quirks and provides a consistent API regardless of the underlying codec.
+audiomorph decodes audio files into a common in-memory representation (`Audio` struct) containing mono PCM data (multi-channel sources are downmixed to mono), then encodes that data to your desired output format. The input format is detected automatically by content sniffing, so files do not need a correct extension. The library handles format-specific quirks and provides a consistent API regardless of the underlying codec.
 
 ### Dependencies
 
@@ -41,11 +41,10 @@ The `Audio` struct provides access to all audio properties:
 
 ```go
 type Audio struct {
-    NumChannels int      // Number of audio channels
     SampleRate  int      // Sample rate in Hz
     BitDepth    int      // Bit depth (bits per sample)
     Format      string   // Detected source format: "wav", "aiff", "mp3", "ogg", "flac"
-    Data        []int    // Interleaved PCM data: Data[sample*NumChannels + channel]
+    Data        []int    // Mono PCM data: Data[sample] (multi-channel sources are downmixed to mono)
     Duration    float64  // Duration in seconds
 }
 ```

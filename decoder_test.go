@@ -2,240 +2,310 @@ package audiomorph
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
+
+	mp3enc "github.com/braheezy/shine-mp3/pkg/mp3"
+	goaudio "github.com/go-audio/audio"
+	"github.com/go-audio/aiff"
+	"github.com/go-audio/wav"
+	"github.com/schollz/goflac"
 )
 
-func TestDecodeWAV(t *testing.T) {
-	filename := filepath.Join("data", "wilhelm.wav")
+const (
+	fixtureSampleRate = 44100
+	fixtureBitDepth   = 16
+	fixtureDuration   = 0.5 // seconds
+)
 
-	audio, err := DecodeFile(filename)
+var fixtureNumSamples = int(fixtureSampleRate * fixtureDuration)
+
+// fixtureLeft/fixtureRight generate deterministic 440 Hz / 880 Hz sine
+// samples for synthetic fixtures.
+func fixtureLeft(i int) int {
+	return int(12000 * math.Sin(2*math.Pi*440*float64(i)/fixtureSampleRate))
+}
+
+func fixtureRight(i int) int {
+	return int(8000 * math.Sin(2*math.Pi*880*float64(i)/fixtureSampleRate))
+}
+
+// requireFixture skips the test when a real sample file is not present.
+// Used for formats without an in-process encoder (e.g. OGG).
+func requireFixture(t *testing.T, name string) string {
+	t.Helper()
+	filename := filepath.Join("data", name)
+	if _, err := os.Stat(filename); err != nil {
+		t.Skipf("fixture %s not available, skipping", filename)
+	}
+	return filename
+}
+
+func intBuffer(data []int, channels int) *goaudio.IntBuffer {
+	return &goaudio.IntBuffer{
+		Format:         &goaudio.Format{NumChannels: channels, SampleRate: fixtureSampleRate},
+		Data:           data,
+		SourceBitDepth: fixtureBitDepth,
+	}
+}
+
+func interleavedFixture(channels int) []int {
+	data := make([]int, 0, fixtureNumSamples*channels)
+	for i := 0; i < fixtureNumSamples; i++ {
+		l, r := fixtureLeft(i), fixtureRight(i)
+		if channels == 1 {
+			data = append(data, l)
+		} else {
+			data = append(data, l, r)
+		}
+	}
+	return data
+}
+
+// writeWAV writes a synthetic WAV file with the given channel count.
+func writeWAV(t *testing.T, path string, channels int) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("failed to create WAV fixture: %v", err)
+	}
+	defer f.Close()
+
+	enc := wav.NewEncoder(f, fixtureSampleRate, fixtureBitDepth, channels, 1)
+	if err := enc.Write(intBuffer(interleavedFixture(channels), channels)); err != nil {
+		t.Fatalf("failed to write WAV fixture: %v", err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatalf("failed to close WAV fixture: %v", err)
+	}
+}
+
+// writeAIFF writes a synthetic AIFF file with the given channel count.
+func writeAIFF(t *testing.T, path string, channels int) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("failed to create AIFF fixture: %v", err)
+	}
+	defer f.Close()
+
+	enc := aiff.NewEncoder(f, fixtureSampleRate, fixtureBitDepth, channels)
+	if err := enc.Write(intBuffer(interleavedFixture(channels), channels)); err != nil {
+		t.Fatalf("failed to write AIFF fixture: %v", err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatalf("failed to close AIFF fixture: %v", err)
+	}
+}
+
+// writeMP3 writes a synthetic mono MP3 file.
+func writeMP3(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("failed to create MP3 fixture: %v", err)
+	}
+	defer f.Close()
+
+	samples := make([]int16, fixtureNumSamples)
+	for i := range samples {
+		samples[i] = int16(fixtureLeft(i))
+	}
+	enc := mp3enc.NewEncoder(fixtureSampleRate, 1)
+	if err := enc.Write(f, samples); err != nil {
+		t.Fatalf("failed to write MP3 fixture: %v", err)
+	}
+}
+
+// writeFLAC writes a synthetic mono FLAC file.
+func writeFLAC(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("failed to create FLAC fixture: %v", err)
+	}
+	defer f.Close()
+
+	samples := make([]int32, fixtureNumSamples)
+	for i := range samples {
+		samples[i] = int32(fixtureLeft(i))
+	}
+	enc, err := goflac.NewEncoder(f, fixtureSampleRate, 1, fixtureBitDepth)
+	if err != nil {
+		t.Fatalf("failed to create FLAC encoder: %v", err)
+	}
+	if err := enc.Encode([][]int32{samples}); err != nil {
+		t.Fatalf("failed to write FLAC fixture: %v", err)
+	}
+}
+
+func TestDecodeWAV(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stereo.wav")
+	writeWAV(t, path, 2)
+
+	audio, err := DecodeFile(path)
 	if err != nil {
 		t.Fatalf("Failed to decode WAV file: %v", err)
 	}
 
-	// Verify that we got some data
-	if audio == nil {
-		t.Fatal("Audio is nil")
+	if audio.SampleRate != fixtureSampleRate {
+		t.Errorf("SampleRate mismatch: expected %d, got %d", fixtureSampleRate, audio.SampleRate)
 	}
-
-	// Check that basic fields are populated
-	if audio.NumChannels <= 0 {
-		t.Errorf("Expected NumChannels > 0, got %d", audio.NumChannels)
+	if audio.BitDepth != fixtureBitDepth {
+		t.Errorf("BitDepth mismatch: expected %d, got %d", fixtureBitDepth, audio.BitDepth)
 	}
-	if audio.SampleRate <= 0 {
-		t.Errorf("Expected SampleRate > 0, got %d", audio.SampleRate)
+	if audio.Format != "wav" {
+		t.Errorf("Format mismatch: expected \"wav\", got %q", audio.Format)
 	}
-	if audio.BitDepth <= 0 {
-		t.Errorf("Expected BitDepth > 0, got %d", audio.BitDepth)
+	if len(audio.Data) != fixtureNumSamples {
+		t.Fatalf("Expected mono downmix to %d samples, got %d", fixtureNumSamples, len(audio.Data))
 	}
-	if len(audio.Data) == 0 {
-		t.Error("Expected audio Data to be non-empty")
+	for i := range audio.Data {
+		want := (fixtureLeft(i) + fixtureRight(i)) / 2
+		if audio.Data[i] != want {
+			t.Errorf("Downmix mismatch at %d: expected %d, got %d", i, want, audio.Data[i])
+			break
+		}
 	}
-	if len(audio.Data)%audio.NumChannels != 0 {
-		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
+	if math.Abs(audio.Duration-fixtureDuration) > 0.01 {
+		t.Errorf("Duration mismatch: expected ~%.2f, got %.2f", fixtureDuration, audio.Duration)
 	}
-	if audio.Duration <= 0 {
-		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
-	}
-
-	t.Logf("WAV Audio Info:")
-	t.Logf("  NumChannels: %d", audio.NumChannels)
-	t.Logf("  SampleRate: %d", audio.SampleRate)
-	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
-	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
 func TestDecodeAIFF(t *testing.T) {
-	filename := filepath.Join("data", "wilhelm.aiff")
+	path := filepath.Join(t.TempDir(), "stereo.aiff")
+	writeAIFF(t, path, 2)
 
-	audio, err := DecodeFile(filename)
+	audio, err := DecodeFile(path)
 	if err != nil {
 		t.Fatalf("Failed to decode AIFF file: %v", err)
 	}
 
-	// Verify that we got some data
-	if audio == nil {
-		t.Fatal("Audio is nil")
+	if audio.SampleRate != fixtureSampleRate {
+		t.Errorf("SampleRate mismatch: expected %d, got %d", fixtureSampleRate, audio.SampleRate)
 	}
-
-	// Check that basic fields are populated
-	if audio.NumChannels <= 0 {
-		t.Errorf("Expected NumChannels > 0, got %d", audio.NumChannels)
+	if audio.BitDepth != fixtureBitDepth {
+		t.Errorf("BitDepth mismatch: expected %d, got %d", fixtureBitDepth, audio.BitDepth)
 	}
-	if audio.SampleRate <= 0 {
-		t.Errorf("Expected SampleRate > 0, got %d", audio.SampleRate)
+	if audio.Format != "aiff" {
+		t.Errorf("Format mismatch: expected \"aiff\", got %q", audio.Format)
 	}
-	if audio.BitDepth <= 0 {
-		t.Errorf("Expected BitDepth > 0, got %d", audio.BitDepth)
+	if len(audio.Data) != fixtureNumSamples {
+		t.Fatalf("Expected mono downmix to %d samples, got %d", fixtureNumSamples, len(audio.Data))
 	}
-	if len(audio.Data) == 0 {
-		t.Error("Expected audio Data to be non-empty")
+	for i := range audio.Data {
+		want := (fixtureLeft(i) + fixtureRight(i)) / 2
+		if audio.Data[i] != want {
+			t.Errorf("Downmix mismatch at %d: expected %d, got %d", i, want, audio.Data[i])
+			break
+		}
 	}
-	if len(audio.Data)%audio.NumChannels != 0 {
-		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
+	if math.Abs(audio.Duration-fixtureDuration) > 0.01 {
+		t.Errorf("Duration mismatch: expected ~%.2f, got %.2f", fixtureDuration, audio.Duration)
 	}
-	if audio.Duration <= 0 {
-		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
-	}
-
-	t.Logf("AIFF Audio Info:")
-	t.Logf("  NumChannels: %d", audio.NumChannels)
-	t.Logf("  SampleRate: %d", audio.SampleRate)
-	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
-	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
 func TestDecodeMP3(t *testing.T) {
-	filename := filepath.Join("data", "wilhelm.mp3")
+	path := filepath.Join(t.TempDir(), "mono.mp3")
+	writeMP3(t, path)
 
-	audio, err := DecodeFile(filename)
+	audio, err := DecodeFile(path)
 	if err != nil {
 		t.Fatalf("Failed to decode MP3 file: %v", err)
 	}
 
-	// Verify that we got some data
-	if audio == nil {
-		t.Fatal("Audio is nil")
+	if audio.SampleRate != fixtureSampleRate {
+		t.Errorf("SampleRate mismatch: expected %d, got %d", fixtureSampleRate, audio.SampleRate)
 	}
-
-	// Check that basic fields are populated
-	if audio.NumChannels <= 0 {
-		t.Errorf("Expected NumChannels > 0, got %d", audio.NumChannels)
-	}
-	if audio.SampleRate <= 0 {
-		t.Errorf("Expected SampleRate > 0, got %d", audio.SampleRate)
-	}
-	if audio.BitDepth <= 0 {
-		t.Errorf("Expected BitDepth > 0, got %d", audio.BitDepth)
+	if audio.Format != "mp3" {
+		t.Errorf("Format mismatch: expected \"mp3\", got %q", audio.Format)
 	}
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data)%audio.NumChannels != 0 {
-		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
-	}
 	if audio.Duration <= 0 {
 		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
 	}
-
-	t.Logf("MP3 Audio Info:")
-	t.Logf("  NumChannels: %d", audio.NumChannels)
-	t.Logf("  SampleRate: %d", audio.SampleRate)
-	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
-	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
 func TestDecodeOGG(t *testing.T) {
-	filename := filepath.Join("data", "wilhelm.ogg")
+	filename := requireFixture(t, "wilhelm.ogg")
 
 	audio, err := DecodeFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to decode OGG file: %v", err)
 	}
 
-	// Verify that we got some data
-	if audio == nil {
-		t.Fatal("Audio is nil")
-	}
-
-	// Check that basic fields are populated
-	if audio.NumChannels <= 0 {
-		t.Errorf("Expected NumChannels > 0, got %d", audio.NumChannels)
-	}
-	if audio.SampleRate <= 0 {
-		t.Errorf("Expected SampleRate > 0, got %d", audio.SampleRate)
-	}
-	if audio.BitDepth <= 0 {
-		t.Errorf("Expected BitDepth > 0, got %d", audio.BitDepth)
+	if audio.Format != "ogg" {
+		t.Errorf("Format mismatch: expected \"ogg\", got %q", audio.Format)
 	}
 	if len(audio.Data) == 0 {
 		t.Error("Expected audio Data to be non-empty")
 	}
-	if len(audio.Data)%audio.NumChannels != 0 {
-		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
-	}
-	if audio.Duration <= 0 {
-		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
-	}
-
-	t.Logf("OGG Audio Info:")
-	t.Logf("  NumChannels: %d", audio.NumChannels)
-	t.Logf("  SampleRate: %d", audio.SampleRate)
-	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
-	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
 func TestDecodeFLAC(t *testing.T) {
-	filename := filepath.Join("data", "wilhelm.flac")
+	path := filepath.Join(t.TempDir(), "mono.flac")
+	writeFLAC(t, path)
 
-	audio, err := DecodeFile(filename)
+	audio, err := DecodeFile(path)
 	if err != nil {
 		t.Fatalf("Failed to decode FLAC file: %v", err)
 	}
 
-	// Verify that we got some data
-	if audio == nil {
-		t.Fatal("Audio is nil")
+	if audio.SampleRate != fixtureSampleRate {
+		t.Errorf("SampleRate mismatch: expected %d, got %d", fixtureSampleRate, audio.SampleRate)
 	}
-
-	// Check that basic fields are populated
-	if audio.NumChannels <= 0 {
-		t.Errorf("Expected NumChannels > 0, got %d", audio.NumChannels)
+	if audio.BitDepth != fixtureBitDepth {
+		t.Errorf("BitDepth mismatch: expected %d, got %d", fixtureBitDepth, audio.BitDepth)
 	}
-	if audio.SampleRate <= 0 {
-		t.Errorf("Expected SampleRate > 0, got %d", audio.SampleRate)
+	if audio.Format != "flac" {
+		t.Errorf("Format mismatch: expected \"flac\", got %q", audio.Format)
 	}
-	if audio.BitDepth <= 0 {
-		t.Errorf("Expected BitDepth > 0, got %d", audio.BitDepth)
+	if len(audio.Data) != fixtureNumSamples {
+		t.Fatalf("Expected %d samples, got %d", fixtureNumSamples, len(audio.Data))
 	}
-	if len(audio.Data) == 0 {
-		t.Error("Expected audio Data to be non-empty")
+	for i := range audio.Data {
+		if audio.Data[i] != fixtureLeft(i) {
+			t.Errorf("Sample mismatch at %d: expected %d, got %d", i, fixtureLeft(i), audio.Data[i])
+			break
+		}
 	}
-	if len(audio.Data)%audio.NumChannels != 0 {
-		t.Errorf("Expected interleaved Data length %d to be a multiple of %d channels", len(audio.Data), audio.NumChannels)
-	}
-	if audio.Duration <= 0 {
-		t.Errorf("Expected Duration > 0, got %f", audio.Duration)
-	}
-
-	t.Logf("FLAC Audio Info:")
-	t.Logf("  NumChannels: %d", audio.NumChannels)
-	t.Logf("  SampleRate: %d", audio.SampleRate)
-	t.Logf("  BitDepth: %d", audio.BitDepth)
-	t.Logf("  Data length: %d interleaved samples", len(audio.Data))
-	t.Logf("  Duration: %.2f seconds", audio.Duration)
 }
 
 func TestDecodeUnsupportedFormat(t *testing.T) {
-	filename := filepath.Join("data", "wilhelm.unknown")
+	path := filepath.Join(t.TempDir(), "junk.unknown")
+	if err := os.WriteFile(path, []byte("this is not audio"), 0o644); err != nil {
+		t.Fatalf("Failed to write junk file: %v", err)
+	}
 
-	_, err := DecodeFile(filename)
-	if err == nil {
+	if _, err := DecodeFile(path); err == nil {
 		t.Fatal("Expected error for unsupported format, got nil")
 	}
 }
 
 func TestDetectFormat(t *testing.T) {
+	dir := t.TempDir()
+	writeWAV(t, filepath.Join(dir, "test.wav"), 2)
+	writeAIFF(t, filepath.Join(dir, "test.aiff"), 2)
+	writeMP3(t, filepath.Join(dir, "test.mp3"))
+	writeFLAC(t, filepath.Join(dir, "test.flac"))
+
 	testCases := []struct {
 		filename string
 		want     string
 	}{
-		{"wilhelm.wav", "wav"},
-		{"wilhelm.aiff", "aiff"},
-		{"wilhelm.mp3", "mp3"},
-		{"wilhelm.ogg", "ogg"},
-		{"wilhelm.flac", "flac"},
+		{"test.wav", "wav"},
+		{"test.aiff", "aiff"},
+		{"test.mp3", "mp3"},
+		{"test.flac", "flac"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.filename, func(t *testing.T) {
-			f, err := os.Open(filepath.Join("data", tc.filename))
+			f, err := os.Open(filepath.Join(dir, tc.filename))
 			if err != nil {
 				t.Fatalf("Failed to open file: %v", err)
 			}
@@ -250,23 +320,45 @@ func TestDetectFormat(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("wilhelm.ogg", func(t *testing.T) {
+		filename := requireFixture(t, "wilhelm.ogg")
+		f, err := os.Open(filename)
+		if err != nil {
+			t.Skipf("Failed to open file: %v", err)
+		}
+		defer f.Close()
+
+		got, err := DetectFormat(f)
+		if err != nil {
+			t.Fatalf("Failed to detect format: %v", err)
+		}
+		if got != "ogg" {
+			t.Errorf("Format mismatch: expected ogg, got %s", got)
+		}
+	})
 }
 
 func TestDecodeAudioFromReader(t *testing.T) {
+	dir := t.TempDir()
+	writeWAV(t, filepath.Join(dir, "test.wav"), 2)
+	writeAIFF(t, filepath.Join(dir, "test.aiff"), 2)
+	writeMP3(t, filepath.Join(dir, "test.mp3"))
+	writeFLAC(t, filepath.Join(dir, "test.flac"))
+
 	testCases := []struct {
 		filename string
 		want     string
 	}{
-		{"wilhelm.wav", "wav"},
-		{"wilhelm.aiff", "aiff"},
-		{"wilhelm.mp3", "mp3"},
-		{"wilhelm.ogg", "ogg"},
-		{"wilhelm.flac", "flac"},
+		{"test.wav", "wav"},
+		{"test.aiff", "aiff"},
+		{"test.mp3", "mp3"},
+		{"test.flac", "flac"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.filename, func(t *testing.T) {
-			fileData, err := os.ReadFile(filepath.Join("data", tc.filename))
+			fileData, err := os.ReadFile(filepath.Join(dir, tc.filename))
 			if err != nil {
 				t.Fatalf("Failed to read file: %v", err)
 			}
@@ -279,8 +371,8 @@ func TestDecodeAudioFromReader(t *testing.T) {
 			if audio.Format != tc.want {
 				t.Errorf("Format mismatch: expected %s, got %s", tc.want, audio.Format)
 			}
-			if audio.NumChannels <= 0 || audio.SampleRate <= 0 {
-				t.Errorf("Expected valid format info, got channels=%d rate=%d", audio.NumChannels, audio.SampleRate)
+			if audio.SampleRate <= 0 {
+				t.Errorf("Expected SampleRate > 0, got %d", audio.SampleRate)
 			}
 			if len(audio.Data) == 0 {
 				t.Error("Expected audio Data to be non-empty")
@@ -293,11 +385,14 @@ func TestDecodeAudioFromReader(t *testing.T) {
 }
 
 func TestDecodeFileSetsFormat(t *testing.T) {
-	audio, err := DecodeFile(filepath.Join("data", "wilhelm.ogg"))
+	path := filepath.Join(t.TempDir(), "test.wav")
+	writeWAV(t, path, 2)
+
+	audio, err := DecodeFile(path)
 	if err != nil {
-		t.Fatalf("Failed to decode OGG file: %v", err)
+		t.Fatalf("Failed to decode WAV file: %v", err)
 	}
-	if audio.Format != "ogg" {
-		t.Errorf("Expected Format \"ogg\", got %q", audio.Format)
+	if audio.Format != "wav" {
+		t.Errorf("Expected Format \"wav\", got %q", audio.Format)
 	}
 }

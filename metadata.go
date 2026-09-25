@@ -15,7 +15,7 @@ import (
 
 // DecodeMetadataFile opens the file at filename and reads only its
 // container/codec headers. The returned Audio carries format metadata
-// (NumChannels, SampleRate, BitDepth, Format, Duration) with Data left nil,
+// (SampleRate, BitDepth, Format, Duration) with Data left nil,
 // so no PCM samples are decoded.
 func DecodeMetadataFile(filename string) (*Audio, error) {
 	f, err := os.Open(filename)
@@ -70,11 +70,10 @@ func metadataWAV(r io.ReadSeeker) (*Audio, error) {
 	}
 
 	return &Audio{
-		NumChannels: int(format.NumChannels),
-		SampleRate:  int(format.SampleRate),
-		BitDepth:    int(decoder.BitDepth),
-		Format:      "wav",
-		Duration:    dur.Seconds(),
+		SampleRate: int(format.SampleRate),
+		BitDepth:   int(decoder.BitDepth),
+		Format:     "wav",
+		Duration:   dur.Seconds(),
 	}, nil
 }
 
@@ -92,11 +91,10 @@ func metadataAIFF(r io.ReadSeeker) (*Audio, error) {
 	}
 
 	return &Audio{
-		NumChannels: int(decoder.NumChans),
-		SampleRate:  int(decoder.SampleRate),
-		BitDepth:    int(decoder.BitDepth),
-		Format:      "aiff",
-		Duration:    dur.Seconds(),
+		SampleRate: int(decoder.SampleRate),
+		BitDepth:   int(decoder.BitDepth),
+		Format:     "aiff",
+		Duration:   dur.Seconds(),
 	}, nil
 }
 
@@ -148,11 +146,10 @@ func metadataFLAC(r io.Reader) (*Audio, error) {
 	}
 
 	return &Audio{
-		NumChannels: int(info.NChannels),
-		SampleRate:  int(info.SampleRate),
-		BitDepth:    int(info.BitsPerSample),
-		Format:      "flac",
-		Duration:    duration,
+		SampleRate: int(info.SampleRate),
+		BitDepth:   int(info.BitsPerSample),
+		Format:     "flac",
+		Duration:   duration,
 	}, nil
 }
 
@@ -165,10 +162,9 @@ func streamToMetadata(streamer beep.StreamSeekCloser, format beep.Format, format
 	}
 
 	return &Audio{
-		NumChannels: format.NumChannels,
-		SampleRate:  int(format.SampleRate),
-		BitDepth:    format.Precision * 8,
-		Format:      formatName,
-		Duration:    float64(streamer.Len()) / float64(format.SampleRate),
+		SampleRate: int(format.SampleRate),
+		BitDepth:   format.Precision * 8,
+		Format:     formatName,
+		Duration:   float64(streamer.Len()) / float64(format.SampleRate),
 	}, nil
 }

@@ -14,13 +14,6 @@ import (
 	interpolators "github.com/schollz/interpolation"
 )
 
-// OptionUseChannels specifies which channels to use when encoding audio.
-func OptionUseChannels(channels []int) Option {
-	return func(a *Audio) {
-		a.useChannels = channels
-	}
-}
-
 // OptionSampleRate specifies the target sample rate for encoding audio.
 func OptionSampleRate(sampleRate int) Option {
 	return func(a *Audio) {
@@ -43,24 +36,6 @@ func OptionBitDepth(bitDepth int) Option {
 	}
 }
 
-// extractChannels selects channels from interleaved PCM data.
-// If useChannels is empty, the original data is returned unchanged; otherwise
-// the output contains len(useChannels) channels in the given order.
-func extractChannels(data []int, numChannels int, useChannels []int) []int {
-	if len(useChannels) == 0 || numChannels <= 0 {
-		return data
-	}
-
-	numSamples := len(data) / numChannels
-	out := make([]int, 0, numSamples*len(useChannels))
-	for i := 0; i < numSamples; i++ {
-		for _, ch := range useChannels {
-			out = append(out, data[i*numChannels+ch])
-		}
-	}
-	return out
-}
-
 // convertSampleRate converts audio data to a different sample rate using interpolation
 func convertSampleRate(audio *Audio, targetSampleRate int, method string) error {
 	// If no target sample rate is specified or it matches current, no conversion needed
@@ -73,8 +48,7 @@ func convertSampleRate(audio *Audio, targetSampleRate int, method string) error 
 		method = "linear"
 	}
 
-	numChannels := audio.NumChannels
-	numSamples := len(audio.Data) / numChannels
+	numSamples := len(audio.Data)
 	ratio := float64(targetSampleRate) / float64(audio.SampleRate)
 	newNumSamples := int(float64(numSamples) * ratio)
 
@@ -101,23 +75,20 @@ func convertSampleRate(audio *Audio, targetSampleRate int, method string) error 
 		return fmt.Errorf("unsupported interpolation method: %s", method)
 	}
 
-	// Resample each channel, then re-interleave
-	newData := make([]int, 0, newNumSamples*numChannels)
-	for ch := 0; ch < numChannels; ch++ {
-		// Deinterleave the channel for interpolation
-		inData := make([]float64, numSamples)
-		for i := 0; i < numSamples; i++ {
-			inData[i] = float64(audio.Data[i*numChannels+ch])
-		}
+	// Resample the mono signal
+	inData := make([]float64, numSamples)
+	for i := 0; i < numSamples; i++ {
+		inData[i] = float64(audio.Data[i])
+	}
 
-		outData, err := interpolators.Interpolate(inData, newNumSamples, interpType)
-		if err != nil {
-			return fmt.Errorf("failed to interpolate channel %d: %w", ch, err)
-		}
+	outData, err := interpolators.Interpolate(inData, newNumSamples, interpType)
+	if err != nil {
+		return fmt.Errorf("failed to interpolate audio: %w", err)
+	}
 
-		for i := 0; i < newNumSamples; i++ {
-			newData = append(newData, int(outData[i]))
-		}
+	newData := make([]int, newNumSamples)
+	for i := 0; i < newNumSamples; i++ {
+		newData[i] = int(outData[i])
 	}
 
 	// Update the audio struct with resampled data
@@ -155,7 +126,7 @@ func convertBitDepth(audio *Audio, targetBitDepth int) error {
 		scale = 1.0 / float64(int64(1)<<uint(sourceBitDepth-targetBitDepth))
 	}
 
-	// Scale every sample in the interleaved data
+	// Scale every sample in the mono data
 	maxVal := int64(1)<<uint(targetBitDepth-1) - 1
 	minVal := -int64(1) << uint(targetBitDepth-1)
 	for i := range audio.Data {
@@ -235,24 +206,16 @@ func encodeWAV(audio *Audio, filename string) error {
 	}
 	defer f.Close()
 
-	// Determine number of channels (channel selection if requested)
-	numChannels := audio.NumChannels
-	if len(audio.useChannels) > 0 {
-		numChannels = len(audio.useChannels)
-	}
-
-	// Create WAV encoder
-	encoder := wav.NewEncoder(f, audio.SampleRate, audio.BitDepth, numChannels, 1)
-
-	data := extractChannels(audio.Data, audio.NumChannels, audio.useChannels)
+	// Create WAV encoder (mono output)
+	encoder := wav.NewEncoder(f, audio.SampleRate, audio.BitDepth, 1, 1)
 
 	// Create PCM buffer
 	buf := &goaudio.IntBuffer{
 		Format: &goaudio.Format{
-			NumChannels: numChannels,
+			NumChannels: 1,
 			SampleRate:  audio.SampleRate,
 		},
-		Data:           data,
+		Data:           audio.Data,
 		SourceBitDepth: audio.BitDepth,
 	}
 
@@ -277,24 +240,16 @@ func encodeAIFF(audio *Audio, filename string) error {
 	}
 	defer f.Close()
 
-	// Determine number of channels (channel selection if requested)
-	numChannels := audio.NumChannels
-	if len(audio.useChannels) > 0 {
-		numChannels = len(audio.useChannels)
-	}
-
-	// Create AIFF encoder
-	encoder := aiff.NewEncoder(f, audio.SampleRate, audio.BitDepth, numChannels)
-
-	data := extractChannels(audio.Data, audio.NumChannels, audio.useChannels)
+	// Create AIFF encoder (mono output)
+	encoder := aiff.NewEncoder(f, audio.SampleRate, audio.BitDepth, 1)
 
 	// Create PCM buffer
 	buf := &goaudio.IntBuffer{
 		Format: &goaudio.Format{
-			NumChannels: numChannels,
+			NumChannels: 1,
 			SampleRate:  audio.SampleRate,
 		},
-		Data:           data,
+		Data:           audio.Data,
 		SourceBitDepth: audio.BitDepth,
 	}
 
@@ -358,21 +313,14 @@ func encodeMP3(audio *Audio, filename string) error {
 	}
 	defer f.Close()
 
-	// Determine number of channels (channel selection if requested)
-	numChannels := audio.NumChannels
-	if len(audio.useChannels) > 0 {
-		numChannels = len(audio.useChannels)
-	}
+	// Create MP3 encoder (mono output) - sample rate should already be converted
+	// to a supported rate by EncodeFile
+	encoder := mp3.NewEncoder(audio.SampleRate, 1)
 
-	// Create MP3 encoder - sample rate should already be converted to a supported rate by EncodeFile
-	encoder := mp3.NewEncoder(audio.SampleRate, numChannels)
-
-	data := extractChannels(audio.Data, audio.NumChannels, audio.useChannels)
-
-	// Convert and scale samples to int16 range (interleaved)
+	// Convert and scale samples to int16 range
 	scale := float64(1<<15) / float64(int64(1)<<uint(audio.BitDepth-1))
-	int16Data := make([]int16, len(data))
-	for i, sample := range data {
+	int16Data := make([]int16, len(audio.Data))
+	for i, sample := range audio.Data {
 		int16Data[i] = int16(float64(sample) * scale)
 	}
 
@@ -392,28 +340,19 @@ func encodeFLAC(audio *Audio, filename string) error {
 	}
 	defer f.Close()
 
-	// Determine number of channels (channel selection if requested)
-	numChannels := audio.NumChannels
-	if len(audio.useChannels) > 0 {
-		numChannels = len(audio.useChannels)
-	}
-
-	// Create FLAC encoder
-	encoder, err := goflac.NewEncoder(f, uint32(audio.SampleRate), uint8(numChannels), uint8(audio.BitDepth))
+	// Create FLAC encoder (mono output)
+	encoder, err := goflac.NewEncoder(f, uint32(audio.SampleRate), 1, uint8(audio.BitDepth))
 	if err != nil {
 		return fmt.Errorf("failed to create FLAC encoder: %w", err)
 	}
 
-	data := extractChannels(audio.Data, audio.NumChannels, audio.useChannels)
-	numSamples := len(data) / numChannels
+	numSamples := len(audio.Data)
 
-	// Deinterleave data into [][]int32 for the FLAC encoder
-	samples := make([][]int32, numChannels)
-	for ch := 0; ch < numChannels; ch++ {
-		samples[ch] = make([]int32, numSamples)
-		for i := 0; i < numSamples; i++ {
-			samples[ch][i] = int32(data[i*numChannels+ch])
-		}
+	// Build the single-channel sample array for the FLAC encoder
+	samples := make([][]int32, 1)
+	samples[0] = make([]int32, numSamples)
+	for i := 0; i < numSamples; i++ {
+		samples[0][i] = int32(audio.Data[i])
 	}
 
 	// Encode samples

@@ -22,3 +22,5 @@ go.work
 *.swo
 *~
 coverage.txt
+
+.workbuddy/

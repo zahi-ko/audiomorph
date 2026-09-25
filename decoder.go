@@ -83,7 +83,25 @@ func DetectFormat(r io.ReadSeeker) (string, error) {
 	}
 }
 
-// decodeWAV decodes a WAV stream. Data is kept interleaved.
+// monoDownmix averages the channels of interleaved PCM data into mono.
+func monoDownmix(data []int, numChannels int) []int {
+	if numChannels <= 1 {
+		return data
+	}
+
+	numSamples := len(data) / numChannels
+	out := make([]int, 0, numSamples)
+	for i := 0; i < numSamples; i++ {
+		sum := 0
+		for ch := 0; ch < numChannels; ch++ {
+			sum += data[i*numChannels+ch]
+		}
+		out = append(out, sum/numChannels)
+	}
+	return out
+}
+
+// decodeWAV decodes a WAV stream, downmixing multi-channel data to mono.
 func decodeWAV(r io.ReadSeeker) (*Audio, error) {
 	decoder := wav.NewDecoder(r)
 	if !decoder.IsValidFile() {
@@ -101,20 +119,16 @@ func decodeWAV(r io.ReadSeeker) (*Audio, error) {
 		return nil, fmt.Errorf("failed to read PCM buffer: %w", err)
 	}
 
-	numChannels := int(format.NumChannels)
-	numSamples := len(buf.Data) / numChannels
-
 	return &Audio{
-		NumChannels: numChannels,
-		SampleRate:  int(format.SampleRate),
-		BitDepth:    int(decoder.BitDepth),
-		Format:      "wav",
-		Data:        buf.Data,
-		Duration:    float64(numSamples) / float64(format.SampleRate),
+		SampleRate: int(format.SampleRate),
+		BitDepth:   int(decoder.BitDepth),
+		Format:     "wav",
+		Data:       monoDownmix(buf.Data, int(format.NumChannels)),
+		Duration:   float64(len(buf.Data)/int(format.NumChannels)) / float64(format.SampleRate),
 	}, nil
 }
 
-// decodeAIFF decodes an AIFF/AIFC stream. Data is kept interleaved.
+// decodeAIFF decodes an AIFF/AIFC stream, downmixing multi-channel data to mono.
 func decodeAIFF(r io.ReadSeeker) (*Audio, error) {
 	decoder := aiff.NewDecoder(r)
 	if !decoder.IsValidFile() {
@@ -127,20 +141,17 @@ func decodeAIFF(r io.ReadSeeker) (*Audio, error) {
 	}
 
 	format := buf.Format
-	numChannels := int(format.NumChannels)
-	numSamples := len(buf.Data) / numChannels
 
 	return &Audio{
-		NumChannels: numChannels,
-		SampleRate:  int(format.SampleRate),
-		BitDepth:    int(decoder.BitDepth),
-		Format:      "aiff",
-		Data:        buf.Data,
-		Duration:    float64(numSamples) / float64(format.SampleRate),
+		SampleRate: int(format.SampleRate),
+		BitDepth:   int(decoder.BitDepth),
+		Format:     "aiff",
+		Data:       monoDownmix(buf.Data, int(format.NumChannels)),
+		Duration:   float64(len(buf.Data)/int(format.NumChannels)) / float64(format.SampleRate),
 	}, nil
 }
 
-// decodeMP3 decodes an MP3 stream. Data is kept interleaved.
+// decodeMP3 decodes an MP3 stream, downmixing multi-channel data to mono.
 func decodeMP3(r io.ReadSeeker) (*Audio, error) {
 	streamer, format, err := mp3.Decode(nopReadSeekCloser{r})
 	if err != nil {
@@ -151,7 +162,7 @@ func decodeMP3(r io.ReadSeeker) (*Audio, error) {
 	return streamToAudio(streamer, format, "mp3")
 }
 
-// decodeOGG decodes an OGG Vorbis stream. Data is kept interleaved.
+// decodeOGG decodes an OGG Vorbis stream, downmixing multi-channel data to mono.
 func decodeOGG(r io.ReadSeeker) (*Audio, error) {
 	streamer, format, err := vorbis.Decode(nopReadSeekCloser{r})
 	if err != nil {
@@ -162,7 +173,7 @@ func decodeOGG(r io.ReadSeeker) (*Audio, error) {
 	return streamToAudio(streamer, format, "ogg")
 }
 
-// decodeFLAC decodes a FLAC stream. Data is kept interleaved.
+// decodeFLAC decodes a FLAC stream, downmixing multi-channel data to mono.
 func decodeFLAC(r io.Reader) (*Audio, error) {
 	stream, err := flac.Parse(r)
 	if err != nil {
@@ -177,7 +188,7 @@ func decodeFLAC(r io.Reader) (*Audio, error) {
 	bitDepth := int(info.BitsPerSample)
 	totalSamples := int(info.NSamples)
 
-	data := make([]int, 0, totalSamples*numChannels)
+	data := make([]int, 0, totalSamples)
 
 	// Read all frames
 	for {
@@ -186,35 +197,34 @@ func decodeFLAC(r io.Reader) (*Audio, error) {
 			break
 		}
 
-		// Append samples interleaved
+		// Average channels into mono
 		for i := 0; i < len(frame.Subframes[0].Samples); i++ {
+			sum := 0
 			for ch := 0; ch < numChannels; ch++ {
-				data = append(data, int(frame.Subframes[ch].Samples[i]))
+				sum += int(frame.Subframes[ch].Samples[i])
 			}
+			data = append(data, sum/numChannels)
 		}
 	}
 
-	numSamples := len(data) / numChannels
-
 	return &Audio{
-		NumChannels: numChannels,
-		SampleRate:  sampleRate,
-		BitDepth:    bitDepth,
-		Format:      "flac",
-		Data:        data,
-		Duration:    float64(numSamples) / float64(sampleRate),
+		SampleRate: sampleRate,
+		BitDepth:   bitDepth,
+		Format:     "flac",
+		Data:       data,
+		Duration:   float64(len(data)) / float64(sampleRate),
 	}, nil
 }
 
-// streamToAudio converts a beep.StreamSeekCloser to an Audio struct with
-// interleaved data.
+// streamToAudio converts a beep.StreamSeekCloser to an Audio struct with mono
+// data, averaging the streamer's channels when it is multi-channel.
 func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format, formatName string) (*Audio, error) {
 	length := streamer.Len()
 	numChannels := format.NumChannels
 	bitDepth := format.Precision * 8
 	maxVal := float64(int64(1) << uint(bitDepth-1))
 
-	data := make([]int, 0, length*numChannels)
+	data := make([]int, 0, length)
 
 	bufSize := 512
 	buf := make([][2]float64, bufSize)
@@ -227,10 +237,12 @@ func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format, formatNam
 		}
 
 		for i := 0; i < n; i++ {
+			// Convert float64 [-1, 1] back to integer PCM, averaging channels
+			sum := 0
 			for ch := 0; ch < numChannels; ch++ {
-				// Convert float64 [-1, 1] back to integer PCM
-				data = append(data, int(buf[i][ch]*maxVal))
+				sum += int(buf[i][ch] * maxVal)
 			}
+			data = append(data, sum/numChannels)
 		}
 		totalRead += n
 
@@ -239,15 +251,12 @@ func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format, formatNam
 		}
 	}
 
-	numSamples := len(data) / numChannels
-
 	return &Audio{
-		NumChannels: numChannels,
-		SampleRate:  int(format.SampleRate),
-		BitDepth:    bitDepth,
-		Format:      formatName,
-		Data:        data,
-		Duration:    float64(numSamples) / float64(format.SampleRate),
+		SampleRate: int(format.SampleRate),
+		BitDepth:   bitDepth,
+		Format:     formatName,
+		Data:       data,
+		Duration:   float64(len(data)) / float64(format.SampleRate),
 	}, nil
 }
 
