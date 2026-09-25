@@ -44,7 +44,7 @@ type Audio struct {
     SampleRate  int      // Sample rate in Hz
     BitDepth    int      // Bit depth (bits per sample)
     Format      string   // Detected source format: "wav", "aiff", "mp3", "ogg", "flac"
-    Data        []int    // Mono PCM data: Data[sample] (multi-channel sources are downmixed to mono)
+    Data        []float32 // Mono PCM data: Data[sample], normalized to [-1.0, 1.0]
     Duration    float64  // Duration in seconds
 }
 ```

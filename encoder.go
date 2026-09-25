@@ -36,6 +36,26 @@ func OptionBitDepth(bitDepth int) Option {
 	}
 }
 
+// toIntSlice converts normalized float32 samples in [-1.0, 1.0] to integer
+// PCM samples at the given bit depth, clamping to the representable range.
+func toIntSlice(data []float32, bitDepth int) []int {
+	maxVal := float64(int64(1) << uint(bitDepth-1))
+	minVal := -int64(1) << uint(bitDepth-1)
+	maxSample := int64(1)<<uint(bitDepth-1) - 1
+
+	out := make([]int, len(data))
+	for i, v := range data {
+		s := int64(float64(v) * maxVal)
+		if s < minVal {
+			s = minVal
+		} else if s > maxSample {
+			s = maxSample
+		}
+		out[i] = int(s)
+	}
+	return out
+}
+
 // convertSampleRate converts audio data to a different sample rate using interpolation
 func convertSampleRate(audio *Audio, targetSampleRate int, method string) error {
 	// If no target sample rate is specified or it matches current, no conversion needed
@@ -86,9 +106,9 @@ func convertSampleRate(audio *Audio, targetSampleRate int, method string) error 
 		return fmt.Errorf("failed to interpolate audio: %w", err)
 	}
 
-	newData := make([]int, newNumSamples)
+	newData := make([]float32, newNumSamples)
 	for i := 0; i < newNumSamples; i++ {
-		newData[i] = int(outData[i])
+		newData[i] = float32(outData[i])
 	}
 
 	// Update the audio struct with resampled data
@@ -111,37 +131,9 @@ func convertBitDepth(audio *Audio, targetBitDepth int) error {
 		return fmt.Errorf("unsupported bit depth: %d (must be 8, 16, 24, or 32)", targetBitDepth)
 	}
 
-	sourceBitDepth := audio.BitDepth
-
-	// Calculate scaling factor
-	// When converting bit depth, we need to scale the sample values
-	// For example, 16-bit samples range from -32768 to 32767
-	// and 24-bit samples range from -8388608 to 8388607
-	var scale float64
-	if targetBitDepth > sourceBitDepth {
-		// Upscaling: multiply by 2^(targetBitDepth - sourceBitDepth)
-		scale = float64(int64(1) << uint(targetBitDepth-sourceBitDepth))
-	} else {
-		// Downscaling: divide by 2^(sourceBitDepth - targetBitDepth)
-		scale = 1.0 / float64(int64(1)<<uint(sourceBitDepth-targetBitDepth))
-	}
-
-	// Scale every sample in the mono data
-	maxVal := int64(1)<<uint(targetBitDepth-1) - 1
-	minVal := -int64(1) << uint(targetBitDepth-1)
-	for i := range audio.Data {
-		scaledValue := float64(audio.Data[i]) * scale
-
-		if scaledValue > float64(maxVal) {
-			audio.Data[i] = int(maxVal)
-		} else if scaledValue < float64(minVal) {
-			audio.Data[i] = int(minVal)
-		} else {
-			audio.Data[i] = int(scaledValue)
-		}
-	}
-
-	// Update the bit depth
+	// Data is normalized to [-1.0, 1.0], so the sample values themselves do
+	// not change with bit depth; only the quantization applied on encode
+	// differs. Validate and record the new depth.
 	audio.BitDepth = targetBitDepth
 
 	return nil
@@ -215,7 +207,7 @@ func encodeWAV(audio *Audio, filename string) error {
 			NumChannels: 1,
 			SampleRate:  audio.SampleRate,
 		},
-		Data:           audio.Data,
+		Data:           toIntSlice(audio.Data, audio.BitDepth),
 		SourceBitDepth: audio.BitDepth,
 	}
 
@@ -249,7 +241,7 @@ func encodeAIFF(audio *Audio, filename string) error {
 			NumChannels: 1,
 			SampleRate:  audio.SampleRate,
 		},
-		Data:           audio.Data,
+		Data:           toIntSlice(audio.Data, audio.BitDepth),
 		SourceBitDepth: audio.BitDepth,
 	}
 
@@ -317,11 +309,16 @@ func encodeMP3(audio *Audio, filename string) error {
 	// to a supported rate by EncodeFile
 	encoder := mp3.NewEncoder(audio.SampleRate, 1)
 
-	// Convert and scale samples to int16 range
-	scale := float64(1<<15) / float64(int64(1)<<uint(audio.BitDepth-1))
+	// Convert and scale normalized samples to int16 range
 	int16Data := make([]int16, len(audio.Data))
 	for i, sample := range audio.Data {
-		int16Data[i] = int16(float64(sample) * scale)
+		s := int64(float64(sample) * 32768)
+		if s < -32768 {
+			s = -32768
+		} else if s > 32767 {
+			s = 32767
+		}
+		int16Data[i] = int16(s)
 	}
 
 	// Write MP3 data
@@ -348,11 +345,21 @@ func encodeFLAC(audio *Audio, filename string) error {
 
 	numSamples := len(audio.Data)
 
-	// Build the single-channel sample array for the FLAC encoder
+	// Build the single-channel sample array for the FLAC encoder, scaling
+	// normalized samples back to the target bit depth
+	maxVal := float64(int64(1) << uint(audio.BitDepth-1))
+	minVal := -int64(1) << uint(audio.BitDepth-1)
+	maxSample := int64(1)<<uint(audio.BitDepth-1) - 1
 	samples := make([][]int32, 1)
 	samples[0] = make([]int32, numSamples)
 	for i := 0; i < numSamples; i++ {
-		samples[0][i] = int32(audio.Data[i])
+		s := int64(float64(audio.Data[i]) * maxVal)
+		if s < minVal {
+			s = minVal
+		} else if s > maxSample {
+			s = maxSample
+		}
+		samples[0][i] = int32(s)
 	}
 
 	// Encode samples

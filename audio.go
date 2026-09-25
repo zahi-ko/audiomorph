@@ -6,7 +6,7 @@ type Audio struct {
 	SampleRate          int
 	BitDepth            int
 	Format              string  // Detected source format: "wav", "aiff", "mp3", "ogg", "flac"
-	Data                []int   // Mono PCM data: Data[sample]
+	Data                []float32 // Mono PCM data: Data[sample], normalized to [-1.0, 1.0]
 	Duration            float64 // in seconds
 	targetSampleRate    int
 	targetBitDepth      int

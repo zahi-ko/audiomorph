@@ -7,8 +7,10 @@ import (
 )
 
 func TestEncodeWAV(t *testing.T) {
-	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
-	writeWAV(t, srcFilename, 2)
+	// Mono source keeps values exactly representable, so the round trip
+	// through 16-bit quantization can be asserted sample-exactly.
+	srcFilename := filepath.Join(t.TempDir(), "mono.wav")
+	writeWAV(t, srcFilename, 1)
 
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
@@ -36,15 +38,15 @@ func TestEncodeWAV(t *testing.T) {
 	}
 	for i := range audio.Data {
 		if decodedAudio.Data[i] != audio.Data[i] {
-			t.Errorf("Sample mismatch at %d: expected %d, got %d", i, audio.Data[i], decodedAudio.Data[i])
+			t.Errorf("Sample mismatch at %d: expected %v, got %v", i, audio.Data[i], decodedAudio.Data[i])
 			break
 		}
 	}
 }
 
 func TestEncodeAIFF(t *testing.T) {
-	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
-	writeWAV(t, srcFilename, 2)
+	srcFilename := filepath.Join(t.TempDir(), "mono.wav")
+	writeWAV(t, srcFilename, 1)
 
 	audio, err := DecodeFile(srcFilename)
 	if err != nil {
@@ -69,6 +71,12 @@ func TestEncodeAIFF(t *testing.T) {
 	}
 	if len(decodedAudio.Data) != len(audio.Data) {
 		t.Errorf("Sample count mismatch: expected %d, got %d", len(audio.Data), len(decodedAudio.Data))
+	}
+	for i := range audio.Data {
+		if decodedAudio.Data[i] != audio.Data[i] {
+			t.Errorf("Sample mismatch at %d: expected %v, got %v", i, audio.Data[i], decodedAudio.Data[i])
+			break
+		}
 	}
 }
 
@@ -133,7 +141,7 @@ func TestEncodeUnsupportedFormat(t *testing.T) {
 	audio := &Audio{
 		SampleRate: 44100,
 		BitDepth:   16,
-		Data:       []int{0, 1, 2, 3, 4, 5},
+		Data:       []float32{0, 0.5, -0.5, 0.25, -0.25, 0.1},
 		Duration:   0.001,
 	}
 
@@ -205,7 +213,7 @@ func TestInvalidInterpolationMethod(t *testing.T) {
 	audio := &Audio{
 		SampleRate: 44100,
 		BitDepth:   16,
-		Data:       []int{0, 100, 200, 300, 400},
+		Data:       []float32{0, 0.1, -0.2, 0.3, -0.4},
 		Duration:   0.0001,
 	}
 
@@ -266,7 +274,7 @@ func TestInvalidBitDepth(t *testing.T) {
 	audio := &Audio{
 		SampleRate: 44100,
 		BitDepth:   16,
-		Data:       []int{0, 100, 200, 300, 400},
+		Data:       []float32{0, 0.1, -0.2, 0.3, -0.4},
 		Duration:   0.0001,
 	}
 

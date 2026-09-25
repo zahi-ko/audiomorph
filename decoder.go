@@ -83,20 +83,31 @@ func DetectFormat(r io.ReadSeeker) (string, error) {
 	}
 }
 
-// monoDownmix averages the channels of interleaved PCM data into mono.
-func monoDownmix(data []int, numChannels int) []int {
+// normalize converts integer PCM samples of the given bit depth to float32
+// in the normalized range [-1.0, 1.0].
+func normalize(data []int, bitDepth int) []float32 {
+	maxVal := float32(int64(1) << uint(bitDepth-1))
+	out := make([]float32, len(data))
+	for i, v := range data {
+		out[i] = float32(v) / maxVal
+	}
+	return out
+}
+
+// monoDownmix averages the channels of interleaved float32 PCM data into mono.
+func monoDownmix(data []float32, numChannels int) []float32 {
 	if numChannels <= 1 {
 		return data
 	}
 
 	numSamples := len(data) / numChannels
-	out := make([]int, 0, numSamples)
+	out := make([]float32, 0, numSamples)
 	for i := range numSamples {
-		sum := 0
+		sum := float32(0)
 		for ch := range numChannels {
 			sum += data[i*numChannels+ch]
 		}
-		out = append(out, sum/numChannels)
+		out = append(out, sum/float32(numChannels))
 	}
 	return out
 }
@@ -119,12 +130,14 @@ func decodeWAV(r io.ReadSeeker) (*Audio, error) {
 		return nil, fmt.Errorf("failed to read PCM buffer: %w", err)
 	}
 
+	numChannels := int(format.NumChannels)
+
 	return &Audio{
 		SampleRate: int(format.SampleRate),
 		BitDepth:   int(decoder.BitDepth),
 		Format:     "wav",
-		Data:       monoDownmix(buf.Data, int(format.NumChannels)),
-		Duration:   float64(len(buf.Data)/int(format.NumChannels)) / float64(format.SampleRate),
+		Data:       monoDownmix(normalize(buf.Data, int(decoder.BitDepth)), numChannels),
+		Duration:   float64(len(buf.Data)/numChannels) / float64(format.SampleRate),
 	}, nil
 }
 
@@ -141,13 +154,14 @@ func decodeAIFF(r io.ReadSeeker) (*Audio, error) {
 	}
 
 	format := buf.Format
+	numChannels := int(format.NumChannels)
 
 	return &Audio{
 		SampleRate: int(format.SampleRate),
 		BitDepth:   int(decoder.BitDepth),
 		Format:     "aiff",
-		Data:       monoDownmix(buf.Data, int(format.NumChannels)),
-		Duration:   float64(len(buf.Data)/int(format.NumChannels)) / float64(format.SampleRate),
+		Data:       monoDownmix(normalize(buf.Data, int(decoder.BitDepth)), numChannels),
+		Duration:   float64(len(buf.Data)/numChannels) / float64(format.SampleRate),
 	}, nil
 }
 
@@ -188,7 +202,8 @@ func decodeFLAC(r io.Reader) (*Audio, error) {
 	bitDepth := int(info.BitsPerSample)
 	totalSamples := int(info.NSamples)
 
-	data := make([]int, 0, totalSamples)
+	data := make([]float32, 0, totalSamples)
+	maxVal := float32(int64(1) << uint(bitDepth-1))
 
 	// Read all frames
 	for {
@@ -197,13 +212,13 @@ func decodeFLAC(r io.Reader) (*Audio, error) {
 			break
 		}
 
-		// Average channels into mono
+		// Normalize, then average channels into mono
 		for i := 0; i < len(frame.Subframes[0].Samples); i++ {
-			sum := 0
+			sum := float32(0)
 			for ch := 0; ch < numChannels; ch++ {
-				sum += int(frame.Subframes[ch].Samples[i])
+				sum += float32(frame.Subframes[ch].Samples[i]) / maxVal
 			}
-			data = append(data, sum/numChannels)
+			data = append(data, sum/float32(numChannels))
 		}
 	}
 
@@ -222,9 +237,8 @@ func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format, formatNam
 	length := streamer.Len()
 	numChannels := format.NumChannels
 	bitDepth := format.Precision * 8
-	maxVal := float64(int64(1) << uint(bitDepth-1))
 
-	data := make([]int, 0, length)
+	data := make([]float32, 0, length)
 
 	bufSize := 512
 	buf := make([][2]float64, bufSize)
@@ -237,12 +251,12 @@ func streamToAudio(streamer beep.StreamSeekCloser, format beep.Format, formatNam
 		}
 
 		for i := 0; i < n; i++ {
-			// Convert float64 [-1, 1] back to integer PCM, averaging channels
-			sum := 0
+			// beep streams are already normalized to [-1, 1]; average channels
+			sum := 0.0
 			for ch := 0; ch < numChannels; ch++ {
-				sum += int(buf[i][ch] * maxVal)
+				sum += buf[i][ch]
 			}
-			data = append(data, sum/numChannels)
+			data = append(data, float32(sum/float64(numChannels)))
 		}
 		totalRead += n
 

@@ -163,9 +163,9 @@ func TestDecodeWAV(t *testing.T) {
 		t.Fatalf("Expected mono downmix to %d samples, got %d", fixtureNumSamples, len(audio.Data))
 	}
 	for i := range audio.Data {
-		want := (fixtureLeft(i) + fixtureRight(i)) / 2
+		want := (float32(fixtureLeft(i))/32768 + float32(fixtureRight(i))/32768) / 2
 		if audio.Data[i] != want {
-			t.Errorf("Downmix mismatch at %d: expected %d, got %d", i, want, audio.Data[i])
+			t.Errorf("Downmix mismatch at %d: expected %v, got %v", i, want, audio.Data[i])
 			break
 		}
 	}
@@ -196,9 +196,9 @@ func TestDecodeAIFF(t *testing.T) {
 		t.Fatalf("Expected mono downmix to %d samples, got %d", fixtureNumSamples, len(audio.Data))
 	}
 	for i := range audio.Data {
-		want := (fixtureLeft(i) + fixtureRight(i)) / 2
+		want := (float32(fixtureLeft(i))/32768 + float32(fixtureRight(i))/32768) / 2
 		if audio.Data[i] != want {
-			t.Errorf("Downmix mismatch at %d: expected %d, got %d", i, want, audio.Data[i])
+			t.Errorf("Downmix mismatch at %d: expected %v, got %v", i, want, audio.Data[i])
 			break
 		}
 	}
@@ -268,8 +268,8 @@ func TestDecodeFLAC(t *testing.T) {
 		t.Fatalf("Expected %d samples, got %d", fixtureNumSamples, len(audio.Data))
 	}
 	for i := range audio.Data {
-		if audio.Data[i] != fixtureLeft(i) {
-			t.Errorf("Sample mismatch at %d: expected %d, got %d", i, fixtureLeft(i), audio.Data[i])
+		if audio.Data[i] != float32(fixtureLeft(i))/32768 {
+			t.Errorf("Sample mismatch at %d: expected %v, got %v", i, float32(fixtureLeft(i))/32768, audio.Data[i])
 			break
 		}
 	}
