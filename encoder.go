@@ -1,7 +1,9 @@
 package audiomorph
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,67 +141,140 @@ func convertBitDepth(audio *Audio, targetBitDepth int) error {
 	return nil
 }
 
-// EncodeFile encodes an Audio struct to a file based on the filename extension
-func EncodeFile(audio *Audio, filename string, options ...Option) error {
+// Encode encodes the Audio to the format given by its Format property
+// ("wav", "aiff", "mp3", or "flac") and returns the encoded bytes as an
+// io.ReadSeeker, mirroring the stream-based Decode API.
+func Encode(a *Audio, options ...Option) (io.ReadSeeker, error) {
 	// Apply options
 	for _, option := range options {
-		option(audio)
+		option(a)
 	}
 
-	ext := strings.ToLower(filepath.Ext(filename))
+	format := strings.ToLower(strings.TrimSpace(a.Format))
+	if format == "" {
+		return nil, fmt.Errorf("format not specified: set Audio.Format (e.g. \"wav\") before encoding")
+	}
 
 	// For MP3 files, ensure the sample rate is supported
-	if ext == ".mp3" {
+	if format == "mp3" {
 		// If a target sample rate was specified, adjust it to nearest supported rate
-		if audio.targetSampleRate > 0 {
-			audio.targetSampleRate = findNearestSupportedMP3SampleRate(audio.targetSampleRate)
+		if a.targetSampleRate > 0 {
+			a.targetSampleRate = findNearestSupportedMP3SampleRate(a.targetSampleRate)
 		} else {
 			// If no target sample rate, but current rate is unsupported, adjust to nearest
-			supportedRate := findNearestSupportedMP3SampleRate(audio.SampleRate)
-			if supportedRate != audio.SampleRate {
-				audio.targetSampleRate = supportedRate
+			supportedRate := findNearestSupportedMP3SampleRate(a.SampleRate)
+			if supportedRate != a.SampleRate {
+				a.targetSampleRate = supportedRate
 			}
 		}
 	}
 
 	// Apply sample rate conversion if specified
-	if audio.targetSampleRate > 0 && audio.targetSampleRate != audio.SampleRate {
-		if err := convertSampleRate(audio, audio.targetSampleRate, audio.interpolationMethod); err != nil {
-			return fmt.Errorf("failed to convert sample rate: %w", err)
+	if a.targetSampleRate > 0 && a.targetSampleRate != a.SampleRate {
+		if err := convertSampleRate(a, a.targetSampleRate, a.interpolationMethod); err != nil {
+			return nil, fmt.Errorf("failed to convert sample rate: %w", err)
 		}
 	}
 
 	// Apply bit depth conversion if specified
-	if audio.targetBitDepth > 0 && audio.targetBitDepth != audio.BitDepth {
-		if err := convertBitDepth(audio, audio.targetBitDepth); err != nil {
-			return fmt.Errorf("failed to convert bit depth: %w", err)
+	if a.targetBitDepth > 0 && a.targetBitDepth != a.BitDepth {
+		if err := convertBitDepth(a, a.targetBitDepth); err != nil {
+			return nil, fmt.Errorf("failed to convert bit depth: %w", err)
 		}
 	}
 
-	switch ext {
-	case ".wav":
-		return encodeWAV(audio, filename)
-	case ".aif", ".aiff":
-		return encodeAIFF(audio, filename)
-	case ".mp3":
-		return encodeMP3(audio, filename)
-	case ".flac":
-		return encodeFLAC(audio, filename)
+	out := &seekableBuffer{}
+	var err error
+
+	switch format {
+	case "wav":
+		err = encodeWAV(a, out)
+	case "aiff":
+		err = encodeAIFF(a, out)
+	case "mp3":
+		err = encodeMP3(a, out)
+	case "flac":
+		err = encodeFLAC(a, out)
 	default:
-		return fmt.Errorf("unsupported file format: %s", ext)
+		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.NewReader(out.buf), nil
 }
 
-// encodeWAV encodes audio data to a WAV file
-func encodeWAV(audio *Audio, filename string) error {
+// EncodeFile encodes an Audio struct to a file based on the filename extension.
+// The extension is written into Audio.Format and encoding is delegated to Encode.
+func EncodeFile(a *Audio, filename string, options ...Option) error {
+	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
+	switch format {
+	case "aif":
+		format = "aiff"
+	case "":
+		return fmt.Errorf("cannot determine format: filename %q has no extension", filename)
+	}
+	a.Format = format
+
+	r, err := Encode(a, options...)
+	if err != nil {
+		return err
+	}
+
 	f, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("failed to create WAV file: %w", err)
+		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer f.Close()
 
+	if _, err := io.Copy(f, r); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	return nil
+}
+
+// seekableBuffer is a minimal in-memory io.WriteSeeker. It is needed because
+// container encoders such as WAV/AIFF patch header fields after writing data.
+type seekableBuffer struct {
+	buf []byte
+	pos int
+}
+
+func (b *seekableBuffer) Write(p []byte) (int, error) {
+	end := b.pos + len(p)
+	if end > len(b.buf) {
+		b.buf = append(b.buf, make([]byte, end-len(b.buf))...)
+	}
+	copy(b.buf[b.pos:end], p)
+	b.pos = end
+	return len(p), nil
+}
+
+func (b *seekableBuffer) Seek(offset int64, whence int) (int64, error) {
+	var newPos int64
+	switch whence {
+	case io.SeekStart:
+		newPos = offset
+	case io.SeekCurrent:
+		newPos = int64(b.pos) + offset
+	case io.SeekEnd:
+		newPos = int64(len(b.buf)) + offset
+	default:
+		return 0, fmt.Errorf("invalid whence: %d", whence)
+	}
+	if newPos < 0 {
+		return 0, fmt.Errorf("negative seek position: %d", newPos)
+	}
+	b.pos = int(newPos)
+	return newPos, nil
+}
+
+// encodeWAV encodes audio data to a WAV stream
+func encodeWAV(audio *Audio, w io.WriteSeeker) error {
 	// Create WAV encoder (mono output)
-	encoder := wav.NewEncoder(f, audio.SampleRate, audio.BitDepth, 1, 1)
+	encoder := wav.NewEncoder(w, audio.SampleRate, audio.BitDepth, 1, 1)
 
 	// Create PCM buffer
 	buf := &goaudio.IntBuffer{
@@ -224,16 +299,10 @@ func encodeWAV(audio *Audio, filename string) error {
 	return nil
 }
 
-// encodeAIFF encodes audio data to an AIFF file
-func encodeAIFF(audio *Audio, filename string) error {
-	f, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create AIFF file: %w", err)
-	}
-	defer f.Close()
-
+// encodeAIFF encodes audio data to an AIFF stream
+func encodeAIFF(audio *Audio, w io.WriteSeeker) error {
 	// Create AIFF encoder (mono output)
-	encoder := aiff.NewEncoder(f, audio.SampleRate, audio.BitDepth, 1)
+	encoder := aiff.NewEncoder(w, audio.SampleRate, audio.BitDepth, 1)
 
 	// Create PCM buffer
 	buf := &goaudio.IntBuffer{
@@ -297,16 +366,10 @@ func abs(x int) int {
 	return x
 }
 
-// encodeMP3 encodes audio data to an MP3 file
-func encodeMP3(audio *Audio, filename string) error {
-	f, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create MP3 file: %w", err)
-	}
-	defer f.Close()
-
+// encodeMP3 encodes audio data to an MP3 stream
+func encodeMP3(audio *Audio, w io.Writer) error {
 	// Create MP3 encoder (mono output) - sample rate should already be converted
-	// to a supported rate by EncodeFile
+	// to a supported rate by Encode
 	encoder := mp3.NewEncoder(audio.SampleRate, 1)
 
 	// Convert and scale normalized samples to int16 range
@@ -322,23 +385,17 @@ func encodeMP3(audio *Audio, filename string) error {
 	}
 
 	// Write MP3 data
-	if err := encoder.Write(f, int16Data); err != nil {
+	if err := encoder.Write(w, int16Data); err != nil {
 		return fmt.Errorf("failed to write MP3 data: %w", err)
 	}
 
 	return nil
 }
 
-// encodeFLAC encodes audio data to a FLAC file
-func encodeFLAC(audio *Audio, filename string) error {
-	f, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create FLAC file: %w", err)
-	}
-	defer f.Close()
-
+// encodeFLAC encodes audio data to a FLAC stream
+func encodeFLAC(audio *Audio, w io.Writer) error {
 	// Create FLAC encoder (mono output)
-	encoder, err := goflac.NewEncoder(f, uint32(audio.SampleRate), 1, uint8(audio.BitDepth))
+	encoder, err := goflac.NewEncoder(w, uint32(audio.SampleRate), 1, uint8(audio.BitDepth))
 	if err != nil {
 		return fmt.Errorf("failed to create FLAC encoder: %w", err)
 	}

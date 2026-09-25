@@ -2,6 +2,7 @@ package audiomorph
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"testing"
 )
@@ -317,4 +318,82 @@ func TestBitDepthAndSampleRateConversion(t *testing.T) {
 
 	t.Logf("Combined conversion test passed: %d Hz @ %d-bit",
 		decodedAudio.SampleRate, decodedAudio.BitDepth)
+}
+
+func TestEncodeReturnsReadSeeker(t *testing.T) {
+	srcFilename := filepath.Join(t.TempDir(), "mono.wav")
+	writeWAV(t, srcFilename, 1)
+
+	audio, err := DecodeFile(srcFilename)
+	if err != nil {
+		t.Fatalf("Failed to decode source file: %v", err)
+	}
+
+	r, err := Encode(audio)
+	if err != nil {
+		t.Fatalf("Failed to encode: %v", err)
+	}
+
+	decodedAudio, err := Decode(r)
+	if err != nil {
+		t.Fatalf("Failed to decode encoded stream: %v", err)
+	}
+
+	if decodedAudio.SampleRate != audio.SampleRate {
+		t.Errorf("SampleRate mismatch: expected %d, got %d", audio.SampleRate, decodedAudio.SampleRate)
+	}
+	if decodedAudio.BitDepth != audio.BitDepth {
+		t.Errorf("BitDepth mismatch: expected %d, got %d", audio.BitDepth, decodedAudio.BitDepth)
+	}
+	if len(decodedAudio.Data) != len(audio.Data) {
+		t.Errorf("Sample count mismatch: expected %d, got %d", len(audio.Data), len(decodedAudio.Data))
+	}
+	for i := range audio.Data {
+		if decodedAudio.Data[i] != audio.Data[i] {
+			t.Errorf("Sample mismatch at %d: expected %v, got %v", i, audio.Data[i], decodedAudio.Data[i])
+			break
+		}
+	}
+}
+
+func TestEncodeFormatTakenFromAudio(t *testing.T) {
+	srcFilename := filepath.Join(t.TempDir(), "mono.wav")
+	writeWAV(t, srcFilename, 1)
+
+	audio, err := DecodeFile(srcFilename)
+	if err != nil {
+		t.Fatalf("Failed to decode source file: %v", err)
+	}
+
+	// Format comes from the Audio property, not from any filename
+	audio.Format = "aiff"
+	r, err := Encode(audio)
+	if err != nil {
+		t.Fatalf("Failed to encode AIFF stream: %v", err)
+	}
+
+	format, err := DetectFormat(r)
+	if err != nil {
+		t.Fatalf("Failed to detect format of encoded stream: %v", err)
+	}
+	if format != "aiff" {
+		t.Errorf("Format mismatch: expected aiff, got %s", format)
+	}
+
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("Returned reader does not support Seek: %v", err)
+	}
+}
+
+func TestEncodeMissingFormat(t *testing.T) {
+	audio := &Audio{
+		SampleRate: 44100,
+		BitDepth:   16,
+		Data:       []float32{0, 0.5, -0.5},
+		Duration:   0.0001,
+	}
+
+	if _, err := Encode(audio); err == nil {
+		t.Fatal("Expected error when Audio.Format is not set, got nil")
+	}
 }

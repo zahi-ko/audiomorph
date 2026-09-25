@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/zahi-ko/audiomorph)](https://github.com/zahi-ko/audiomorph/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/zahi-ko/audiomorph.svg)](https://pkg.go.dev/github.com/zahi-ko/audiomorph)
 
-A Go library and CLI tool for decoding and encoding audio files across multiple formats. audiomorph provides a unified interface for reading audio data from WAV, AIFF, MP3, OGG, and FLAC files, and encoding to WAV, AIFF, MP3, OGG, and FLAC formats.
+A Go library and CLI tool for decoding and encoding audio files across multiple formats. audiomorph provides a unified interface for reading audio data from WAV, AIFF, MP3, OGG, and FLAC files, and encoding to WAV, AIFF, MP3, and FLAC formats.
 
 ## How It Works
 
@@ -33,7 +33,10 @@ audio, err := audiomorph.DecodeFile("input.mp3")
 // Decode audio from any io.ReadSeeker (bytes.Reader, bufio.Reader, network stream...)
 audio, err := audiomorph.Decode(bytes.NewReader(data))
 
-// Encode audio to file (supports WAV, AIFF, MP3, OGG, FLAC)
+// Encode audio to an in-memory io.ReadSeeker, using audio.Format ("wav", "aiff", "mp3", "flac")
+reader, err := audiomorph.Encode(audio)
+
+// Encode audio to file (format taken from the filename extension)
 err = audiomorph.EncodeFile(audio, "output.wav")
 ```
 
