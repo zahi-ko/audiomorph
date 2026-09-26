@@ -2,6 +2,7 @@ package audiomorph
 
 import (
 	"bytes"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -394,5 +395,72 @@ func TestDecodeFileSetsFormat(t *testing.T) {
 	}
 	if audio.Format != "wav" {
 		t.Errorf("Expected Format \"wav\", got %q", audio.Format)
+	}
+}
+
+// TestReaderPositionRestored verifies that stream-consuming functions restore
+// the read position of the io.ReadSeeker, so the same reader can be reused
+// for subsequent calls.
+func TestReaderPositionRestored(t *testing.T) {
+	dir := t.TempDir()
+	writeWAV(t, filepath.Join(dir, "test.wav"), 2)
+	writeMP3(t, filepath.Join(dir, "test.mp3"))
+
+	testCases := []struct {
+		filename string
+		want     string
+	}{
+		{"test.wav", "wav"},
+		{"test.mp3", "mp3"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.filename, func(t *testing.T) {
+			fileData, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("Failed to read file: %v", err)
+			}
+
+			// DetectFormat must not consume the stream.
+			r := bytes.NewReader(fileData)
+			if _, err := r.Seek(7, io.SeekStart); err != nil {
+				t.Fatalf("Seek failed: %v", err)
+			}
+			format, err := DetectFormat(r)
+			if err != nil {
+				t.Fatalf("DetectFormat failed: %v", err)
+			}
+			if format != tc.want {
+				t.Errorf("Format mismatch: expected %s, got %s", tc.want, format)
+			}
+			if pos, err := r.Seek(0, io.SeekCurrent); err != nil || pos != 7 {
+				t.Errorf("DetectFormat did not restore position: pos = %d, err = %v", pos, err)
+			}
+
+			// Decode must leave the reader reusable: decode twice from the
+			// same reader.
+			r = bytes.NewReader(fileData)
+			for i := 0; i < 2; i++ {
+				audio, err := Decode(r)
+				if err != nil {
+					t.Fatalf("Decode call %d failed: %v", i+1, err)
+				}
+				if audio.Format != tc.want {
+					t.Errorf("Decode call %d: Format mismatch: expected %s, got %s", i+1, tc.want, audio.Format)
+				}
+			}
+
+			// DecodeMetadata must leave the reader reusable too.
+			r = bytes.NewReader(fileData)
+			for i := 0; i < 2; i++ {
+				meta, err := DecodeMetadata(r)
+				if err != nil {
+					t.Fatalf("DecodeMetadata call %d failed: %v", i+1, err)
+				}
+				if meta.Format != tc.want {
+					t.Errorf("DecodeMetadata call %d: Format mismatch: expected %s, got %s", i+1, tc.want, meta.Format)
+				}
+			}
+		})
 	}
 }

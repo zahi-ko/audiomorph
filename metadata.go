@@ -30,7 +30,13 @@ func DecodeMetadataFile(filename string) (*Audio, error) {
 // DecodeMetadata reads audio metadata from an io.ReadSeeker without decoding
 // any PCM data. The format is detected automatically by sniffing the leading
 // bytes. The returned Audio has all metadata fields populated and Data nil.
+// The read position of r is restored to where it was on entry when
+// DecodeMetadata returns, so the same reader remains usable for subsequent
+// calls.
 func DecodeMetadata(r io.ReadSeeker) (*Audio, error) {
+	restore := restoreSeeker(r)
+	defer restore()
+
 	format, err := DetectFormat(r)
 	if err != nil {
 		return nil, err

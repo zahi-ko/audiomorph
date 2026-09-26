@@ -26,9 +26,26 @@ func DecodeFile(filename string) (*Audio, error) {
 	return Decode(f)
 }
 
+// restoreSeeker records the current position of r and returns a function that
+// seeks back to it, so stream-consuming functions can restore the caller's
+// read position when they finish (successfully or not).
+func restoreSeeker(r io.ReadSeeker) func() {
+	pos, err := r.Seek(0, io.SeekCurrent)
+	return func() {
+		if err == nil {
+			_, _ = r.Seek(pos, io.SeekStart)
+		}
+	}
+}
+
 // Decode decodes audio from an io.ReadSeeker and returns an Audio struct.
 // The format is detected automatically by sniffing the leading bytes.
+// The read position of r is restored to where it was on entry when Decode
+// returns, so the same reader remains usable for subsequent calls.
 func Decode(r io.ReadSeeker) (*Audio, error) {
+	restore := restoreSeeker(r)
+	defer restore()
+
 	format, err := DetectFormat(r)
 	if err != nil {
 		return nil, err
@@ -55,14 +72,20 @@ func Decode(r io.ReadSeeker) (*Audio, error) {
 
 // DetectFormat sniffs the leading bytes of r to identify the audio format.
 // It returns one of "wav", "aiff", "mp3", "ogg", "flac", or an error if the
-// format is not recognized. The read position is restored to the start.
+// format is not recognized. Sniffing always starts from the beginning of the
+// stream; the read position of r is restored to where it was on entry when
+// DetectFormat returns.
 func DetectFormat(r io.ReadSeeker) (string, error) {
+	restore := restoreSeeker(r)
+	defer restore()
+
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("failed to rewind stream: %w", err)
+	}
+
 	header := make([]byte, 12)
 	if _, err := io.ReadFull(r, header); err != nil {
 		return "", fmt.Errorf("failed to read file header: %w", err)
-	}
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return "", fmt.Errorf("failed to rewind stream: %w", err)
 	}
 
 	switch {
