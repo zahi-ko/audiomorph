@@ -3,7 +3,7 @@ module github.com/zahi-ko/audiomorph
 go 1.25
 
 require (
-	github.com/braheezy/shine-mp3 v0.1.0
+	github.com/braheezy/shine-mp3 v0.2.0
 	github.com/faiface/beep v1.1.0
 	github.com/go-audio/aiff v1.1.0
 	github.com/go-audio/audio v1.0.0

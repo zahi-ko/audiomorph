@@ -108,6 +108,37 @@ func TestEncodeMP3(t *testing.T) {
 	}
 }
 
+// TestEncodeMP3MonoDuration guards against shine-mp3 v0.1.0's Write bug:
+// its loop advanced by samples_per_pass*2 unconditionally, so mono input
+// was consumed at twice the rate and the encoded output lost half its
+// duration. The fix shipped in v0.2.0 (stride now scales by channels).
+func TestEncodeMP3MonoDuration(t *testing.T) {
+	srcFilename := filepath.Join(t.TempDir(), "mono.wav")
+	writeWAV(t, srcFilename, 1)
+
+	audio, err := DecodeFile(srcFilename)
+	if err != nil {
+		t.Fatalf("Failed to decode source file: %v", err)
+	}
+	srcSamples := len(audio.Data)
+
+	dstFilename := filepath.Join(t.TempDir(), "mono_output.mp3")
+	if err := EncodeFile(audio, dstFilename); err != nil {
+		t.Fatalf("Failed to encode MP3 file: %v", err)
+	}
+
+	decodedAudio, err := DecodeFile(dstFilename)
+	if err != nil {
+		t.Fatalf("Failed to decode encoded MP3 file: %v", err)
+	}
+
+	// MP3 framing adds up to one frame (~1152 samples) of padding.
+	tolerance := int(float64(srcSamples) * 0.01) + 1152
+	if got := len(decodedAudio.Data); got < srcSamples-tolerance || got > srcSamples+tolerance {
+		t.Errorf("Mono MP3 duration truncated: expected ~%d samples, got %d", srcSamples, got)
+	}
+}
+
 func TestEncodeFLAC(t *testing.T) {
 	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
 	writeWAV(t, srcFilename, 2)

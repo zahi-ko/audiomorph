@@ -1,6 +1,6 @@
 github.com/DATA-DOG/go-sqlmock v1.3.3/go.mod h1:f/Ixk793poVmq4qj/V1dPUg2JEAKC73Q5eFN3EC/SaM=
-github.com/braheezy/shine-mp3 v0.1.0 h1:N2wZhv6ipCFduTSftaPNdDgZ5xFmQAPvB7JcqA4sSi8=
-github.com/braheezy/shine-mp3 v0.1.0/go.mod h1:0H/pmcpFAd+Fnrj6Pc7du7wL36U/HqtfcgPJuCgc1L4=
+github.com/braheezy/shine-mp3 v0.2.0 h1:0OwmbVLfQFe4c5+UjV5FF4NKedxYw0qHnP5rDOs/wjU=
+github.com/braheezy/shine-mp3 v0.2.0/go.mod h1:0H/pmcpFAd+Fnrj6Pc7du7wL36U/HqtfcgPJuCgc1L4=
 github.com/d4l3k/messagediff v1.2.2-0.20190829033028-7e0a312ae40b/go.mod h1:Oozbb1TVXFac9FtSIxHBMnBCq2qeH/2KkEQxENCrlLo=
 github.com/faiface/beep v1.1.0 h1:A2gWP6xf5Rh7RG/p9/VAW2jRSDEGQm5sbOb38sf5d4c=
 github.com/faiface/beep v1.1.0/go.mod h1:6I8p6kK2q4opL/eWb+kAkk38ehnTunWeToJB+s51sT4=
