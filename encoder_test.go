@@ -139,6 +139,86 @@ func TestEncodeMP3MonoDuration(t *testing.T) {
 	}
 }
 
+// mp3FrameLen returns the header-declared length of an MPEG Layer III frame,
+// or 0 if the header is not a valid one.
+func mp3FrameLen(h []byte) int {
+	if len(h) < 4 || h[0] != 0xFF || h[1]&0xE0 != 0xE0 {
+		return 0
+	}
+	version := (h[1] >> 3) & 0x3
+	layer := (h[1] >> 1) & 0x3
+	if version == 1 || layer != 1 { // reserved version / not Layer III
+		return 0
+	}
+	bitrateIndex := int(h[2] >> 4)
+	sampleRateIndex := int((h[2] >> 2) & 0x3)
+	padding := int((h[2] >> 1) & 0x1)
+	if bitrateIndex == 0 || bitrateIndex == 15 || sampleRateIndex == 3 {
+		return 0
+	}
+	bitrates := []int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}
+	sampleRates := []int{44100, 48000, 32000}
+	divisor := 144
+	if version != 3 { // MPEG-2 / MPEG-2.5 use different tables and half the slots
+		bitrates = []int{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}
+		sampleRates = []int{22050, 24000, 16000}
+		if version == 0 {
+			sampleRates = []int{11025, 12000, 8000}
+		}
+		divisor = 72
+	}
+	return divisor*bitrates[bitrateIndex]*1000/sampleRates[sampleRateIndex] + padding
+}
+
+// TestEncodeMP3FrameIntegrity walks the encoded stream frame by frame. A frame
+// size that does not match the header (the 8-byte per-frame overrun
+// shine-mp3 v0.2.0 writes for mono) desynchronizes the walk, and a dropped
+// half of the input shows up as too few frames.
+func TestEncodeMP3FrameIntegrity(t *testing.T) {
+	const sampleRate = 44100
+	const seconds = 3
+	n := seconds * sampleRate
+
+	data := make([]float32, n)
+	for i := range data {
+		data[i] = float32(0.4 * float64(int16(i%997)) / 32768)
+	}
+	audio := &Audio{
+		SampleRate: sampleRate,
+		BitDepth:   16,
+		Data:       data,
+		Duration:   float64(n) / float64(sampleRate),
+		Format:     "mp3",
+	}
+
+	r, err := Encode(audio)
+	if err != nil {
+		t.Fatalf("Failed to encode MP3 stream: %v", err)
+	}
+	encoded, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("Failed to read encoded stream: %v", err)
+	}
+
+	frames := 0
+	for pos := 0; pos+4 <= len(encoded); {
+		length := mp3FrameLen(encoded[pos:])
+		if length == 0 {
+			t.Fatalf("Frame %d: invalid header at offset %d (% x) - frame size does not match header",
+				frames, pos, encoded[pos:min(pos+4, len(encoded))])
+		}
+		pos += length
+		frames++
+	}
+
+	// Every frame carries 1152 samples at 44.1 kHz; allow one frame of slack
+	// for the encoder's lookahead/padding.
+	expected := (n + 1151) / 1152
+	if frames < expected-1 || frames > expected+2 {
+		t.Errorf("Frame count mismatch: expected ~%d, got %d", expected, frames)
+	}
+}
+
 func TestEncodeFLAC(t *testing.T) {
 	srcFilename := filepath.Join(t.TempDir(), "stereo.wav")
 	writeWAV(t, srcFilename, 2)

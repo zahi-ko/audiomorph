@@ -366,14 +366,30 @@ func abs(x int) int {
 	return x
 }
 
-// encodeMP3 encodes audio data to an MP3 stream
-func encodeMP3(audio *Audio, w io.Writer) error {
-	// Create MP3 encoder (mono output) - sample rate should already be converted
-	// to a supported rate by Encode
-	encoder := mp3.NewEncoder(audio.SampleRate, 1)
+// mp3SamplesPerFrame returns the number of PCM samples carried by one MP3
+// frame: MPEG-1 Layer III uses 1152, MPEG-2 and MPEG-2.5 use 576.
+func mp3SamplesPerFrame(sampleRate int) int {
+	switch sampleRate {
+	case 44100, 48000, 32000: // MPEG-1
+		return 1152
+	default: // MPEG-2 / MPEG-2.5
+		return 576
+	}
+}
 
+// encodeMP3 encodes audio data to an MP3 stream.
+//
+// The output is written as dual-mono stereo (L = R) rather than mono, because
+// shine-mp3 cannot encode mono: v0.1.0's Write() advanced its cursor by twice
+// the samples per frame and dropped half of a mono input; v0.2.0 fixed that
+// stride but mono frames then exceed their header-declared length by 8 bytes,
+// producing a stream strict decoders reject. The stereo path frames correctly,
+// but only when it is handed an interleaved chunk of channels*samplesPerFrame
+// samples per frame - Write() passes samplesPerFrame, so half of every frame
+// would be filled with silence. So the encoder is driven frame by frame here.
+func encodeMP3(audio *Audio, w io.Writer) error {
 	// Convert and scale normalized samples to int16 range
-	int16Data := make([]int16, len(audio.Data))
+	pcm := make([]int16, len(audio.Data))
 	for i, sample := range audio.Data {
 		s := int64(float64(sample) * 32768)
 		if s < -32768 {
@@ -381,12 +397,30 @@ func encodeMP3(audio *Audio, w io.Writer) error {
 		} else if s > 32767 {
 			s = 32767
 		}
-		int16Data[i] = int16(s)
+		pcm[i] = int16(s)
 	}
 
-	// Write MP3 data
-	if err := encoder.Write(w, int16Data); err != nil {
-		return fmt.Errorf("failed to write MP3 data: %w", err)
+	encoder := mp3.NewEncoder(audio.SampleRate, 2)
+	samplesPerFrame := mp3SamplesPerFrame(audio.SampleRate)
+	// The trailing partial frame is zero padded, which is what the encoder
+	// does internally once it runs out of input.
+	chunk := make([]int16, samplesPerFrame*2)
+
+	for start := 0; start < len(pcm); start += samplesPerFrame {
+		clear(chunk)
+		end := start + samplesPerFrame
+		if end > len(pcm) {
+			end = len(pcm)
+		}
+		for i, j := start, 0; i < end; i, j = i+1, j+1 {
+			chunk[2*j] = pcm[i]
+			chunk[2*j+1] = pcm[i]
+		}
+
+		data, written := encoder.EncodeBufferInterleaved(chunk)
+		if _, err := w.Write(data[:written]); err != nil {
+			return fmt.Errorf("failed to write MP3 data: %w", err)
+		}
 	}
 
 	return nil
